@@ -1,5 +1,16 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
+import { PLACE_KINDS } from '@grims/shared';
+
+/*
+ * The place kinds as a SQL literal list, built from the constant so the two cannot drift.
+ *
+ * Interpolated into the query rather than bound as a parameter, which is safe here because every
+ * value comes from a compile-time `as const` in @grims/shared and nothing user-supplied reaches it.
+ * A bound parameter is the natural instinct and it silently breaks the partial-index match — see
+ * the note at the query.
+ */
+const PLACE_LIST = PLACE_KINDS.map((k) => `'${k}'`).join(', ');
 import { EmbedClient } from './embed.client.js';
 
 /**
@@ -104,9 +115,20 @@ export class KnowledgeService {
    * look it up BY. The answer is a paragraph in a guide that very likely never uses the word
    * "jump range" in those words, and only a vector can find it.
    *
-   * Restricted to embedded sources by construction: the query returns rows whose embedding is not
-   * null, and only prose sources are ever embedded (see STORAGE_KIND). A market row has no vector
-   * and cannot surface here even if the question sounds like prose.
+   * ★ THIS COMMENT USED TO SAY THE FILTER WAS UNNECESSARY — 2026-08-22 ★
+   *
+   * It said: "restricted to embedded sources by construction ... only prose sources are ever
+   * embedded (see STORAGE_KIND). A market row has no vector and cannot surface here." That was true
+   * when written, and it stopped being true the day the squadron owner asked for full EDDN coverage
+   * and 687,000 systems and stations gained vectors.
+   *
+   * Nothing failed loudly. "How do I become a member of the squadron" simply started returning five
+   * star system names, because 302 prose rows cannot win an APPROXIMATE search against 687,000
+   * places — the joining guide sat at cosine distance 0.2183 while the index returned rows at
+   * 0.3904, and an exact scan found the guide instantly every time.
+   *
+   * So the restriction is now IN THE QUERY rather than in this comment. Adding data cannot break
+   * it again.
    */
   async semantic(query: string, limit = LIMIT): Promise<Fact[]> {
     if (this.embed === null || !this.embed.configured) return [];
@@ -137,6 +159,27 @@ export class KnowledgeService {
                   1 - (embedding <=> $1::vector) AS similarity
              FROM knowledge_items
             WHERE embedding IS NOT NULL
+              /*
+               * ★ A LITERAL LIST, AND IT HAS TO BE — MEASURED 2026-08-22 ★
+               *
+               * This must match the knowledge_items_embedding_prose_idx predicate EXACTLY, or
+               * Postgres cannot prove the query is covered by that partial index and falls back to
+               * the shared one. Written first as an inequality against a BOUND PARAMETER — the
+               * same condition, expressed the way one normally would — and that does not match:
+               * the planner used the place-dominated index, fetched its candidates, filtered every
+               * one of them away, and returned ZERO ROWS in 11ms.
+               *
+               * That is worse than the bug it was fixing. An assistant that answers nothing looks
+               * like an assistant with nothing to say, and nobody reports that.
+               *
+               * Built from PLACE_KINDS rather than typed out, so the code and the index cannot
+               * drift; prose-not-places.spec.ts holds the migration to the same list.
+               *
+               * (No backticks anywhere in this comment: it lives INSIDE a template literal, and a
+               * stray one ends the string. That trap has now cost this project five separate
+               * occasions, every one of them an unterminated-string error pointing somewhere else.)
+               */
+              AND kind NOT IN (${PLACE_LIST})
             ORDER BY embedding <=> $1::vector
             LIMIT $2
          ) ranked
