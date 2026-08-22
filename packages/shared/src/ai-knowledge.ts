@@ -48,6 +48,18 @@ export const KNOWLEDGE_SOURCES = [
   'reference',
   /** Our own forum: accepted answers and highly-rated posts. */
   'forum',
+  /*
+   * ★ SYSTEMS A MEMBER ACTUALLY FLEW TO ★
+   *
+   * Written by `live-systems.ts` from a paired companion's journal, and MISSING FROM THIS LIST until
+   * 2026-08-22 — so it was absent from `EMBEDDED_SOURCES`, no sweep ever selected those rows, and
+   * 5,917 of them sat with text and a NULL embedding from the day the feature shipped.
+   *
+   * The exhaustive Records below are meant to make exactly that a compile error. They could not:
+   * those rows are inserted with `$executeRawUnsafe` and the source as a SQL string literal, which
+   * the compiler never sees. `knowledge-source-declared.spec.ts` reads the SQL instead.
+   */
+  'companion',
 ] as const;
 export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
 
@@ -109,6 +121,16 @@ export const STORAGE_KIND: Record<KnowledgeSource, 'lookup' | 'vector' | 'both'>
   /** Prose. There is nothing to look these up BY except their meaning. */
   reference: 'vector',
   forum: 'vector',
+  /*
+   * `both`, like the galaxy rows they sit beside. A member asks for these by NAME ("have we been to
+   * Colonia") which is a lookup, and by DESCRIPTION ("somewhere we have been with a water world")
+   * which is not.
+   *
+   * Safe to embed despite being live data: `live-systems.ts` never rewrites `text` and nothing in
+   * the codebase clears `embedding`, so each vector is written once. This is not the continuous
+   * rewriting that market snapshots would have caused.
+   */
+  companion: 'both',
 };
 
 /** Every source whose text should carry a vector. Derived, so it can never drift from the table. */
@@ -147,6 +169,12 @@ export const EMBED_EVERY_MINUTES: Record<KnowledgeSource, number> = {
   eddn: 5,
   /** The roster changes when somebody joins or is promoted. Daily is plainly enough. */
   inara: 1_440,
+  /*
+   * Daily, and deliberately not hourly. A sweep of 200 rows or more ends in a REINDEX of the vector
+   * index; at its full size that is a nightly operation, not an hourly one. Members do not fly
+   * somewhere new and then immediately ask the assistant about it.
+   */
+  companion: 1_440,
   /** Both follow their ingest — there is nothing new between runs, so a sweep would find nothing. */
   galaxy: 1_440,
   coriolis: 180,
@@ -227,6 +255,8 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
   reference: 0.5,
   /** Every half hour. An accepted answer should be usable by the assistant the same session. */
   forum: 0.5,
+  /* Pushed by paired companions as members fly; nothing to go and fetch, so this never pulls. */
+  companion: 0,
 };
 
 /** What the training page shows for one source. */
@@ -360,6 +390,7 @@ export const SOURCE_LABELS: Record<KnowledgeSource, string> = {
   inara: 'Squadron roster',
   reference: 'Guides and reference',
   forum: 'Answered forum questions',
+  companion: 'Systems our members have flown to',
 };
 
 /**
@@ -378,4 +409,5 @@ export const SOURCE_ANSWERS: Record<KnowledgeSource, string> = {
   inara: 'Who is in the squadron and what rank they hold',
   reference: 'How the game works — mechanics, lore, our own guides',
   forum: 'Questions this squadron has already answered',
+  companion: 'Systems the squadron has actually visited, as their companions reported them',
 };
