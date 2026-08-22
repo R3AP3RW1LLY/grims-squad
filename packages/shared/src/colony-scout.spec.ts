@@ -6,8 +6,7 @@ import {
   explainCandidate,
   rankCandidates,
   type PermitSource,
-  type ScoutCandidate,
-} from './colony-scout.js';
+  type ScoutCandidate, sweepNotice } from './colony-scout.js';
 
 /**
  * Choosing where to colonise next.
@@ -323,3 +322,49 @@ describe('a candidate score that shows its working', () => {
 function reasonsTolerance(count: number): number {
   return Math.max(0.11, count * 0.06);
 }
+
+/**
+ * ★ THE SENTENCE THAT SEPARATES "NOTHING THERE" FROM "WE COULD NOT LOOK" ★
+ *
+ * The owner reported the scout "no longer finding anything". It was finding things — the sweep was
+ * timing out and the empty result rendered as "Nothing claimable in range", which is what an empty
+ * region renders as. These guard the one piece of text that tells those apart.
+ */
+describe('telling a member their search did not finish', () => {
+  it('★ MANDATORY: a finished sweep says nothing at all ★', () => {
+    /*
+     * If a complete sweep produced a notice, every quiet corner of the galaxy would carry a warning
+     * and members would learn to read past the one that matters.
+     */
+    expect(sweepNotice(null, 0)).toBeNull();
+    expect(sweepNotice(null, 48)).toBeNull();
+  });
+
+  it('★ MANDATORY: an empty failed sweep says we could not look ★', () => {
+    const msg = sweepNotice('timeout', 0);
+
+    expect(msg).not.toBeNull();
+    expect(msg, 'the whole point: this must not read as an empty region').toMatch(
+      /could not look|did not answer/i,
+    );
+  });
+
+  it('says how many it did find when it found some', () => {
+    expect(sweepNotice('network', 48)).toContain('48');
+  });
+
+  it('★ MANDATORY: a page cap asks for a NARROWER search, not another attempt ★', () => {
+    /*
+     * "Try again" and "narrow the range" are opposite instructions. Repeating an identical search
+     * that hit a page cap returns an identical truncated list, so telling somebody to retry would
+     * send them round a loop that cannot end.
+     */
+    const capped = sweepNotice('page-cap', 1000);
+    expect(capped).toMatch(/narrow/i);
+    expect(capped, 'retrying is exactly the wrong advice here').not.toMatch(/try again in a moment/i);
+
+    const stalled = sweepNotice('timeout', 1000);
+    expect(stalled).toMatch(/try again/i);
+    expect(stalled).not.toMatch(/narrow/i);
+  });
+});

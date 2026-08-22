@@ -256,3 +256,57 @@ export function explainCandidate(c: ScoutCandidate): {
 export function rankCandidates(candidates: readonly ScoutCandidate[]): ScoutCandidate[] {
   return [...candidates].sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
 }
+
+/**
+ * Why a galaxy sweep stopped early. Mirrors `SweepFailure` in @grims/ed-clients.
+ *
+ * Restated here rather than imported: this package is the one both the website and the companion
+ * already depend on, and the app must not have to pull a network client in to render a sentence.
+ */
+export type ScoutSweepFailure = 'timeout' | 'http' | 'network' | 'page-cap';
+
+/**
+ * What to tell a member when the search did not finish.
+ *
+ * ★ SQUADRON OWNER, 2026-08-22 ★
+ *
+ * "the scouting system in the colonization module is now no longer finding anything or returning any
+ * results!"
+ *
+ * It was finding things. The sweep was timing out, and a timed-out sweep produced the same empty
+ * list an empty region produces — so the page said "Nothing claimable in range" and the owner spent
+ * their evening looking for a fault in the scout.
+ *
+ * ★ THE SENTENCE LIVES HERE SO BOTH SURFACES SAY IT ★
+ *
+ * The owner's standing rule is that the app mirrors the website. Two copies of this wording would
+ * drift the first time either was edited, and the failure it describes is precisely the kind nobody
+ * notices until it matters.
+ *
+ * ★ AND WHY EACH READS DIFFERENTLY ★
+ *
+ * "Try again" and "narrow your search" are opposite instructions. A stall is transient and worth
+ * repeating; a page cap is a limit the member can actually do something about. One sentence for
+ * both would be wrong for one of them every time.
+ */
+export function sweepNotice(
+  failure: ScoutSweepFailure | null,
+  found: number,
+): string | null {
+  if (failure === null) return null;
+
+  if (failure === 'page-cap') {
+    return found === 0
+      ? 'This search reached its page limit before finding anything. Narrow the range and try again.'
+      : `This search reached its page limit, so there are more systems out there than the ${found} below. Narrow the range to see the rest.`;
+  }
+
+  /*
+   * Everything else is the service failing us rather than a limit we chose, and the member's move is
+   * the same in each case: wait a moment and search again. The distinction between a stall, a bad
+   * status and a dead socket matters in the logs, not on the page.
+   */
+  return found === 0
+    ? 'The galaxy service did not answer, so this search could not be completed. Nothing here means "we could not look" — not "there is nothing there". Try again in a moment.'
+    : `The galaxy service stopped answering partway through, so this list is incomplete — there may be more than the ${found} below. Try again in a moment.`;
+}

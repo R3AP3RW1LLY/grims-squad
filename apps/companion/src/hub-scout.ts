@@ -44,6 +44,13 @@ export interface ScoutResult {
   readonly consideredSystems: number;
   readonly permitSources: number;
   readonly unknownAnchor: string | null;
+  /**
+   * Why the galaxy sweep stopped early, or null when it finished.
+   *
+   * Optional: a hub older than this build does not send it, and an app that assumed the field would
+   * mark every search against an older hub as incomplete.
+   */
+  readonly incomplete?: 'timeout' | 'http' | 'network' | 'page-cap' | null;
 }
 
 export interface SurveyedBody {

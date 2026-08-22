@@ -171,9 +171,13 @@ export function judgeSite(
   }
 
   /*
-   * `systemsNear` swallows every failure and returns whatever it had, so a timeout, a rate limit
-   * and a genuinely unknown system are indistinguishable at the call site. Counting any of them as
-   * an absence would mean an hour of Spansh being down closes builds.
+   * A timeout, a rate limit and a genuinely unknown system must never be counted as an absence —
+   * an hour of Spansh being down would otherwise close builds that are standing perfectly well.
+   *
+   * This job has always drawn that distinction itself (`probeSystemViaSpansh` runs its own request
+   * precisely so it can). The scout's `systemsNear` used to swallow the difference and no longer
+   * does — it returns `complete` alongside the systems — which is what the owner hit on 2026-08-22
+   * when a stalled sweep reported "nothing claimable in range".
    */
   if (!probe.answered) return { kind: 'unknown', ledger };
 

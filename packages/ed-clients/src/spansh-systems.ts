@@ -73,6 +73,38 @@ function num(v: unknown, fallback = 0): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 }
 
+/** Why a sweep stopped early. `page-cap` is our own limit; the rest are the service's. */
+export type SweepFailure = 'timeout' | 'http' | 'network' | 'page-cap';
+
+/**
+ * What a sweep found, AND whether that is all of it.
+ *
+ * ★ THE ANSWER CARRIES ITS OWN COMPLETENESS — SQUADRON OWNER, 2026-08-22 ★
+ *
+ * "the scouting system in the colonization module is now no longer finding anything"
+ *
+ * This used to return a bare `SpanshSystem[]`. Every failure path was `break`, so a stalled first
+ * page produced `[]` — the identical value a genuinely empty region produces. The scout rendered it
+ * as "Nothing claimable in range" and a member was told the galaxy was empty when the truth was
+ * that we never managed to ask.
+ *
+ * The type is the fix. A caller cannot forget to check a field it has to destructure past, and
+ * `complete` has no sensible default that hides a truncation.
+ */
+export interface SpanshSweep {
+  readonly systems: SpanshSystem[];
+  /** False when anything was missed — a failure, or our own page cap. */
+  readonly complete: boolean;
+  readonly pagesFetched: number;
+  /** Null exactly when `complete` is true. */
+  readonly failure: SweepFailure | null;
+}
+
+/** An abort reads as a timeout; anything else thrown is the network. */
+function classify(err: unknown): SweepFailure {
+  return err instanceof Error && err.name === 'AbortError' ? 'timeout' : 'network';
+}
+
 /**
  * Every system inside `radiusLy` of a named system.
  *
@@ -83,42 +115,68 @@ export async function systemsNear(
   systemName: string,
   radiusLy: number,
   opts: SpanshOptions = {},
-): Promise<SpanshSystem[]> {
+): Promise<SpanshSweep> {
   const doFetch = opts.fetchImpl ?? fetch;
   const maxPages = opts.maxPages ?? 20;
   const out: SpanshSystem[] = [];
+  let pagesFetched = 0;
 
   for (let page = 0; page < maxPages; page += 1) {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 20_000);
+    /*
+     * ★ ONE RETRY BEFORE ANYTHING IS SAID — SQUADRON OWNER, 2026-08-22 ★
+     *
+     * The observed failure is a transient stall: the same search that returned nothing after 20
+     * seconds returned 48 systems two minutes later. One extra request turns most of these into an
+     * ordinary result the member never hears about, which is worth far more than a warning they
+     * would learn to click past.
+     *
+     * Only ONE, though. A member is waiting on this, and three retries against a service that is
+     * genuinely down is a minute of staring at a spinner before being told the same thing.
+     */
+    let rows: RawRow[] | null = null;
+    let failure: SweepFailure | null = null;
 
-    let rows: RawRow[];
-    try {
-      const res = await doFetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
-        signal: ac.signal,
-        body: JSON.stringify({
-          filters: { distance: { min: '0', max: String(radiusLy) } },
-          sort: [{ distance: { direction: 'asc' } }],
-          size: 50,
-          page,
-          reference_system: systemName,
-        }),
-      });
+    for (let attempt = 0; attempt < 2 && rows === null; attempt += 1) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 20_000);
 
-      if (!res.ok) break;
-      const body = (await res.json()) as { results?: unknown };
-      rows = Array.isArray(body.results) ? (body.results as RawRow[]) : [];
-    } catch {
-      /*
-       * A partial answer beats none. The scout ranks whatever it received and the page says how
-       * many systems were considered, so a truncated sweep is visible rather than silent.
-       */
-      break;
-    } finally {
-      clearTimeout(timer);
+      try {
+        const res = await doFetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
+          signal: ac.signal,
+          body: JSON.stringify({
+            filters: { distance: { min: '0', max: String(radiusLy) } },
+            sort: [{ distance: { direction: 'asc' } }],
+            size: 50,
+            page,
+            reference_system: systemName,
+          }),
+        });
+
+        if (!res.ok) {
+          failure = 'http';
+          continue;
+        }
+        const body = (await res.json()) as { results?: unknown };
+        rows = Array.isArray(body.results) ? (body.results as RawRow[]) : [];
+        failure = null;
+      } catch (err) {
+        failure = classify(err);
+      } finally {
+        clearTimeout(timer);
+      }
     }
+
+    if (rows === null) {
+      /*
+       * A partial answer still beats none — the scout ranks whatever arrived. What changed is that
+       * the list no longer claims to be the whole picture.
+       */
+      return { systems: out, complete: false, pagesFetched, failure: failure ?? 'network' };
+    }
+
+    pagesFetched += 1;
 
     for (const r of rows) {
       if (typeof r.name !== 'string') continue;
@@ -144,10 +202,23 @@ export async function systemsNear(
       });
     }
 
-    if (rows.length < 50) break;
+    /*
+     * A short page is the end of the region — the only way this sweep finishes having seen
+     * everything there is to see.
+     */
+    if (rows.length < 50) {
+      return { systems: out, complete: true, pagesFetched, failure: null };
+    }
   }
 
-  return out;
+  /*
+   * Fell out of the loop with every page full, so the region continues past our own cap.
+   *
+   * Reported as a truncation rather than a clean finish. It was silent before for exactly the same
+   * reason a failed page was: a bare array had nowhere to say so, and "stopped early because we
+   * chose to" looks identical to "that is all of them" once the list is on screen.
+   */
+  return { systems: out, complete: false, pagesFetched, failure: 'page-cap' };
 }
 
 /** Uninhabited, unlocked, not already colonised — the set a claim can actually be made in. */
