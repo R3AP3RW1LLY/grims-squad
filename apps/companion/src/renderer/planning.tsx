@@ -256,8 +256,31 @@ function PlanList({
         const costed = p.sites.filter((s) => s.totalTonnes !== null);
         const total = costed.reduce((sum, s) => sum + (s.totalTonnes ?? 0), 0);
 
+        /*
+         * ★ ONE FINDING, THE MOST ACTIONABLE ★
+         *
+         * Three conditions can be true at once and a broken plan is always also an old one. The hub
+         * ranks them and this shows the first — showing all three buries the fault under two
+         * observations, and the eye lands on the last line.
+         *
+         * Here for the same reason as on the website: the owner's mirror rule, and because an
+         * officer who only ever opens the app would otherwise never learn a plan was broken.
+         */
+        const flag = p.orphanFlags?.[0];
+
         return (
           <Card key={p.id}>
+            {flag === undefined ? null : (
+              <p
+                style={{
+                  margin: '0 0 6px',
+                  fontSize: '11px',
+                  color: flag.kind === 'dangling-sites' ? C.warn : C.faint,
+                }}
+              >
+                {flag.message}
+              </p>
+            )}
             <div
               style={{
                 display: 'flex',
