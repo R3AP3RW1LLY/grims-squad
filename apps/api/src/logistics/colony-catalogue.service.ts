@@ -33,6 +33,9 @@ export interface BuildTypeRow {
   readonly tier: number;
   readonly location: 'orbital' | 'surface';
   readonly padSize: 'none' | 'small' | 'medium' | 'large';
+  /** Which tier of point this build spends, and how many. Zero for a tier-1 build. */
+  readonly needsTier: number;
+  readonly needsPoints: number;
   readonly totalTonnes: number;
   readonly commodities: number;
   /**
@@ -142,6 +145,9 @@ export class ColonyCatalogueService {
               b.eff_population, b.eff_max_population, b.eff_security, b.eff_technology,
               b.eff_wealth, b.eff_standard_of_living, b.eff_development,
               b.economy_influence, b.economy_fixed,
+              -- What a build SPENDS. Sent so the picker can say "needs 3 T2 — only 1 banked" beside
+              -- the option, instead of the planner catching it after the site has been added.
+              b.needs_tier, b.needs_points,
               count(c.commodity) AS commodities
          FROM colony_build_types b
          LEFT JOIN colony_build_costs c ON c.build_type_id = b.id
@@ -288,6 +294,8 @@ export class ColonyCatalogueService {
         ? (r.pad_size as 'none' | 'small' | 'medium' | 'large')
         : 'none',
       totalTonnes: r.total_tonnes,
+      needsTier: Number(r.needs_tier ?? 0),
+      needsPoints: Number(r.needs_points ?? 0),
       commodities: Number(r.commodities),
       source: r.source === 'observed' ? 'observed' : 'community',
       confirmations: r.confirmations,
@@ -315,6 +323,8 @@ interface CatalogueRowRecord {
   location: string;
   pad_size: string;
   total_tonnes: number;
+  needs_tier: number | null;
+  needs_points: number | null;
   commodities: bigint;
   source: string;
   confirmations: number;

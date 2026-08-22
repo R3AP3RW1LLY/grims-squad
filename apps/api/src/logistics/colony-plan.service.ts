@@ -13,6 +13,7 @@ import {
   type PredictedMarket,
   type SimBuildType,
   type SimResult,
+  orphanFlags,
   profileSystem,
   renderBuildBook,
   scoreRoles,
@@ -420,7 +421,27 @@ export class ColonyPlanService {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.system_id64::text AS system_id64,
               p.notes, p.version, p.posted_by_id, p.updated_at, u.display_name AS posted_by,
-              s.fetched_at
+              s.fetched_at,
+              /*
+               * ★ THE THREE FACTS AN ORPHAN FLAG NEEDS — SQUADRON OWNER, 2026-08-22 ★
+               *
+               * Counted in the list query rather than fetched per plan: the planning page shows
+               * every plan at once, and a per-plan round trip would be one query per row to decide
+               * whether to draw a badge.
+               *
+               * dangling_sites is the only one that is a fault -- sites pointing at a project that
+               * no longer exists, so the plan measures progress against something gone.
+               */
+              (SELECT count(*) FROM colony_plan_sites ps
+                WHERE ps.plan_id = p.id AND ps.project_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM colony_projects cp WHERE cp.id = ps.project_id)
+              )::int AS dangling_sites,
+              (SELECT count(*) FROM colony_plan_sites ps WHERE ps.plan_id = p.id)::int AS site_count,
+              (SELECT count(*) FROM colony_projects cp
+                WHERE cp.system_name = p.system_name
+                  AND cp.completed_at IS NULL AND cp.abandoned_at IS NULL)::int AS live_projects,
+              EXISTS (SELECT 1 FROM colony_projects cp WHERE cp.system_name = p.system_name)
+                AS ever_built
          FROM colony_plans p
          JOIN users u ON u.id = p.posted_by_id
          LEFT JOIN colony_systems s ON s.id64 = p.system_id64
@@ -450,11 +471,41 @@ export class ColonyPlanService {
     const sites = await this.#sitesOfMany(plans.map((p) => p.id));
     const catalogue = await this.#catalogueFor([...sites.values()].flat().map((s) => s.buildTypeId));
 
+    const now = new Date();
+    const byId = new Map(rows.map((r) => [String(r['id']), r]));
+
     return plans.map((plan) => {
       const mine = sites.get(plan.id) ?? [];
+      const r = byId.get(plan.id);
+
+      /*
+       * ★ FLAGGED, NEVER CORRECTED — SQUADRON OWNER, 2026-08-22 ★
+       *
+       * "orphan" meant three things and the answer was all three, ranked. `orphanFlags` decides
+       * which one to say; every condition it reports is recoverable, so nothing here changes a plan.
+       * A forgotten plan may be next month's project.
+       */
+      const flags =
+        r === undefined
+          ? []
+          : orphanFlags(
+              {
+                planId: plan.id,
+                title: plan.title,
+                systemName: plan.systemName,
+                touchedAt: (r['updated_at'] as Date | null) ?? null,
+                siteCount: Number(r['site_count'] ?? 0),
+                danglingSites: Number(r['dangling_sites'] ?? 0),
+                liveProjects: Number(r['live_projects'] ?? 0),
+                everBuilt: r['ever_built'] === true,
+              },
+              now,
+            );
+
       return {
         ...plan,
         sites: mine,
+        orphanFlags: flags,
         simulation: simulatePlan(
           mine.map((s) => ({ id: s.id, buildTypeId: s.buildTypeId })),
           catalogue,

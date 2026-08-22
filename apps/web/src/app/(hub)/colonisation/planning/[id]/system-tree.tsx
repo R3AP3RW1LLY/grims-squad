@@ -250,6 +250,19 @@ export function SystemTree({
   const sitesOn = (bodyId: number): PlanSite[] => plan.sites.filter((s) => s.bodyId === bodyId);
 
   /*
+   * What the plan has banked once every existing step has run.
+   *
+   * A new build is appended to the END of the order, so the LAST step's balance is the one it will
+   * meet. Taking the first, or the largest, would tell a member they can afford something the game
+   * will refuse — which is the failure this is here to prevent, restated.
+   *
+   * An empty plan has banked nothing, which is correct: the first build must be one that needs no
+   * points.
+   */
+  const last = plan.simulation.steps[plan.simulation.steps.length - 1];
+  const banked = { tier2: last?.tier2 ?? 0, tier3: last?.tier3 ?? 0 };
+
+  /*
    * The market prediction's epistemics, ONCE for the page rather than under every port. Distinct
    * notes because a micro-market (settlement pads) carries an extra clause about trimmed lines.
    */
@@ -451,6 +464,8 @@ export function SystemTree({
                         buildTypes={buildTypes}
                         where={where}
                         busy={busy}
+                        landable={body.isLandable}
+                        banked={banked}
                         onAdd={(buildTypeId) =>
                           void act(() =>
                             apiPost(`${base}/sites`, {
@@ -574,11 +589,38 @@ function AddSite({
   buildTypes,
   where,
   busy,
+  landable,
+  banked,
   onAdd,
 }: {
   buildTypes: readonly ColonyBuildType[];
   where: 'orbital' | 'surface';
   busy: boolean;
+  /**
+   * Whether this body can be landed on.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22: "the warnings are not visible enough" ★
+   *
+   * The plan checker has always caught a surface build on a body nobody can land on — AFTER it was
+   * added, in the verdict at the top of the page. The picker itself never asked the question, so it
+   * cheerfully offered fifteen settlements for a gas giant and the member found out by scrolling.
+   *
+   * A rule that fires in a report you have to open is a rule somebody meets as a correction rather
+   * than as guidance. The check has moved to where the choice is made.
+   */
+  landable: boolean;
+  /**
+   * Points banked at the END of the current order, which is where a new build lands.
+   *
+   * ★ THE OTHER HALF OF "NOT VISIBLE ENOUGH" ★
+   *
+   * The checker has always said "step 6 needs a tier-2 point and none are banked" — in the verdict,
+   * after the site was added. The picker knew the whole catalogue and nothing about what the plan
+   * could afford, so a member chose a Coriolis, added it, and was then told they could not.
+   *
+   * Now the cost is beside the option and the unaffordable ones say so before they are picked.
+   */
+  banked: { tier2: number; tier3: number };
   onAdd: (buildTypeId: string) => void;
 }) {
   const [choice, setChoice] = useState('');
@@ -595,6 +637,21 @@ function AddSite({
    * measured at 337 KB of HTML, and a 173-body system would be several megabytes of markup nobody
    * asked for. A button costs a line. The list is one click away and identical when it arrives.
    */
+  /*
+   * ★ SAID BEFORE THE CHOICE, NOT AFTER IT ★
+   *
+   * Nothing surface can go here, so no list is offered and the reason is given in place of one.
+   * Offering a picker that can only produce an invalid plan is worse than offering nothing: it
+   * reads as permission.
+   */
+  if (where === 'surface' && !landable) {
+    return (
+      <p className="m-0 mt-1 text-[11px] text-[var(--color-text-dim)]">
+        Nothing can be built on the surface here — this body cannot be landed on.
+      </p>
+    );
+  }
+
   if (!open) {
     return (
       <button type="button" className={`${CHIP} mt-1`} onClick={() => setOpen(true)}>
@@ -648,12 +705,24 @@ function AddSite({
         className={`${FIELD} max-w-[260px]`}
       >
         <option value="">add a build…</option>
-        {usable.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.displayName} · T{b.tier}
-            {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
-          </option>
-        ))}
+        {usable.map((b) => {
+          /*
+           * What this build spends, against what the order has banked by the time it is reached.
+           * `needsTier` is 2 or 3; a build that needs nothing is always affordable.
+           */
+          const have = b.needsTier >= 3 ? banked.tier3 : banked.tier2;
+          const short = b.needsPoints > 0 && have < b.needsPoints;
+
+          return (
+            <option key={b.id} value={b.id}>
+              {b.displayName} · T{b.tier}
+              {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
+              {b.needsPoints > 0
+                ? ` · needs ${b.needsPoints} T${b.needsTier}${short ? ` — only ${have} banked` : ''}`
+                : ''}
+            </option>
+          );
+        })}
       </select>
       <button
         type="button"
