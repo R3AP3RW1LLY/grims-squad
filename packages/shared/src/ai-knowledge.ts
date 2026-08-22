@@ -255,8 +255,20 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
   reference: 0.5,
   /** Every half hour. An accepted answer should be usable by the assistant the same session. */
   forum: 0.5,
-  /* Pushed by paired companions as members fly; nothing to go and fetch, so this never pulls. */
-  companion: 0,
+  /*
+   * ★ NOT A SCHEDULE — A DEADLINE, exactly like `eddn` above ★
+   *
+   * Nothing pulls this. Paired companions PUSH systems as members fly, so there is no "companion
+   * ingest" to start; `RESIDENT` in the worker's scheduler is what keeps it from being started.
+   *
+   * The number is therefore a staleness alarm: 24 hours without a single member reporting a system
+   * means the pairing path has stopped, which is worth knowing and is otherwise invisible.
+   *
+   * It was `0` first, which broke three scheduler tests and deserved to. Zero does not read as
+   * "never pulls" — it reads as "due right now, and again next tick, for ever", and it collapsed
+   * the shortest-cadence check that keeps TICK_MS honest.
+   */
+  companion: 24,
 };
 
 /** What the training page shows for one source. */

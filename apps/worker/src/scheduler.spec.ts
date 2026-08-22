@@ -94,6 +94,29 @@ describe('dueSources', () => {
     expect(RESIDENT).toContain('eddn');
   });
 
+  it('★ MANDATORY: companion is never scheduled either ★', () => {
+    /*
+     * ★ A SURVIVING MUTATION, 2026-08-22 ★
+     *
+     * Removing `companion` from RESIDENT failed nothing. The guard existed and no test held it
+     * down, so a later edit could have quietly restored the exact behaviour the list prevents:
+     * starting a "companion ingest" that starts nothing, for ever.
+     *
+     * Paired companions PUSH systems as members fly them. There is no run to begin. Its
+     * REFRESH_HOURS is a staleness alarm — 24 hours with nothing reported means the pairing path
+     * has stopped — and an alarm threshold must never be read as a schedule.
+     *
+     * `finishedAt: null` is the hard case: a source that has NEVER run is otherwise due
+     * immediately, so this is where a missing RESIDENT entry shows up first.
+     */
+    const due = dueSources(
+      fresh({ companion: { source: 'companion', finishedAt: null, running: false } }),
+      NOW,
+    );
+    expect(due, 'nothing pulls companion data — it arrives on its own').not.toContain('companion');
+    expect(RESIDENT).toContain('companion');
+  });
+
   it('every non-resident source is schedulable', () => {
     // If a source were absent from the loop it would never run and nothing would report it.
     const everythingStale = KNOWLEDGE_SOURCES.map((source) => ({ source, finishedAt: null, running: false }));
