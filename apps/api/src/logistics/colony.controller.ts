@@ -588,6 +588,24 @@ export class ColonyController {
    * whether a system is worth hauling to is usually not an officer. The bloc routes below, which
    * DO change what the advice says for everybody, are officers-only.
    */
+  /**
+   * A first layout for a system, proposed by the assistant and ruled on by the plan checker.
+   *
+   * ★ POST, AND COLONY_POST ★
+   *
+   * A GET invites a browser to make an assistant call on every prefetch, and this one costs a model
+   * round trip. It is also gated harder than the advice beside it: reading what a system is good for
+   * is for everybody, and generating a layout is for somebody who could actually post one.
+   *
+   * The checker's verdict comes back with the draft — see `draft()` for why it is never repaired.
+   */
+  @Post('systems/:name/draft')
+  async draftLayout(@User() caller: CurrentUser | undefined, @Param('name') name: string) {
+    this.#requireSession(caller);
+    await this.#assert(caller, Permission.COLONY_POST, 'You cannot post colonisation plans.');
+    return this.advisor.draft(decodeURIComponent(name));
+  }
+
   @Get('systems/:name/advice')
   async systemAdvice(@User() caller: CurrentUser | undefined, @Param('name') name: string) {
     await this.#assert(

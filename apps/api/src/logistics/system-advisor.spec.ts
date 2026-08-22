@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { profileSystem, scoreRoles, type SurveyBody } from '@grims/shared';
-import { renderFacts } from './system-advisor.service.js';
+import { readDraft, renderFacts } from './system-advisor.service.js';
 
 /**
  * What the assistant is allowed to know about a system.
@@ -141,5 +141,67 @@ describe('the facts handed to the assistant', () => {
 
     expect(facts).toContain('0 water worlds');
     expect(facts).toContain('0 terraforming candidates');
+  });
+});
+
+describe('reading a layout the assistant proposed', () => {
+  it('reads a clean answer', () => {
+    const out = readDraft('[{"typeId":"plutus","bodyId":1,"why":"opens without locking the economy"}]');
+    expect(out).toEqual([{ typeId: 'plutus', bodyId: 1, why: 'opens without locking the economy' }]);
+  });
+
+  it('★ MANDATORY: a fenced or chatty answer still reads ★', () => {
+    /*
+     * A model asked for JSON usually returns JSON, and "usually" is not a contract. A fence, a
+     * sentence of explanation first, or both, all arrive eventually — and none of them should put a
+     * stack trace on a planning page.
+     */
+    const fenced = 'Here is the layout:\n```json\n[{"typeId":"vesta","bodyId":4,"why":"the view"}]\n```';
+    expect(readDraft(fenced)).toHaveLength(1);
+  });
+
+  it('★ MANDATORY: an unreadable answer is empty, not a throw ★', () => {
+    /*
+     * ★ THE TRAILING COMMA IS THE CASE THAT MATTERS, AND IT WAS MISSING ★
+     *
+     * The first version of this test listed junk that never reaches JSON.parse at all — no bracket,
+     * an unclosed bracket, an object rather than an array — so removing the try/catch broke nothing
+     * and the test looked like it covered the parse. Mutation testing found it.
+     *
+     * `[{"typeId":"plutus",}]` is the real shape: a model producing ALMOST valid JSON. It has both
+     * brackets, it reaches the parse, and it throws.
+     */
+    for (const junk of [
+      'not json at all',
+      '',
+      '[',
+      '{"typeId":"plutus"}',
+      '[1,2,3]',
+      '[{"typeId":"plutus","bodyId":1,}]',
+      '[{typeId: plutus}]',
+      '[{"typeId":"plutus" "bodyId":1}]',
+    ]) {
+      expect(() => readDraft(junk), junk).not.toThrow();
+      expect(readDraft(junk), junk).toEqual([]);
+    }
+  });
+
+  it('★ MANDATORY: a body id that is not a number is refused, never coerced ★', () => {
+    /*
+     * `Number("body 4")` is NaN and `Number("")` is ZERO — and a zero body id would silently point
+     * at whatever body happens to be numbered zero rather than being rejected as the nonsense it is.
+     * Coercion here would turn a model's confusion into a plan step nobody could explain.
+     */
+    expect(readDraft('[{"typeId":"plutus","bodyId":"4","why":"x"}]')).toEqual([]);
+    expect(readDraft('[{"typeId":"plutus","bodyId":"","why":"x"}]')).toEqual([]);
+    expect(readDraft('[{"typeId":"plutus","bodyId":null,"why":"x"}]')).toEqual([]);
+  });
+
+  it('drops rows with no structure named, and keeps the rest', () => {
+    // One bad row must not lose a whole layout — the good steps are still worth showing, and the
+    // caller counts what was dropped and says so.
+    const out = readDraft('[{"typeId":"","bodyId":1},{"typeId":"vesta","bodyId":2,"why":"ok"}]');
+    expect(out).toHaveLength(1);
+    expect(out[0]?.typeId).toBe('vesta');
   });
 });

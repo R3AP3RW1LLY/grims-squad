@@ -509,6 +509,19 @@ export class ColonyDeviceController {
    * COLONY_VIEW: this is advice, it changes nothing, and the member deciding whether a system is
    * worth hauling to is usually not an officer.
    */
+  /**
+   * A first layout for a system, proposed and then ruled on.
+   *
+   * POST rather than GET: it spends an assistant call, and a GET invites a browser or a crawler to
+   * make one on every prefetch. Nothing drafts unless somebody presses the button.
+   */
+  @Public()
+  @Post('systems/:name/draft')
+  async draftLayout(@Req() req: FastifyRequest, @Param('name') name: string) {
+    await this.#caller(req, Permission.COLONY_POST, 'You cannot post colonisation plans.');
+    return this.advisor.draft(decodeURIComponent(name));
+  }
+
   @Public()
   @Get('systems/:name/advice')
   async systemAdvice(@Req() req: FastifyRequest, @Param('name') name: string) {
