@@ -8,6 +8,7 @@ import type {
   ColonyPlan,
   RosterEntry,
   StationClaim,
+  SystemAdvice,
   ColonyHauler,
   ColonyNeed,
   ColonyProject,
@@ -231,6 +232,11 @@ declare global {
       planReview(
         id: string,
       ): Promise<Answer<{ review: string; facts: string; unavailable: string | null }>>;
+      /**
+       * What a SYSTEM should be built as. Takes a name, not a plan id — a system can be advised on
+       * before anybody has laid out a plan for it, which is the point on the scout page.
+       */
+      systemAdvice(systemName: string): Promise<Answer<SystemAdvice>>;
       planReorder(
         id: string,
         body: { version: number; siteIds: string[] },

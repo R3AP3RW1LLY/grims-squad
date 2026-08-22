@@ -47,6 +47,7 @@ import {
   colonyProjects,
   colonyDeclarePurchase,
   colonyPlanReview,
+  colonySystemAdvice,
   colonyClaimStation,
   colonyPurchases,
   colonyStationClaims,
@@ -2323,6 +2324,10 @@ if (!app.requestSingleInstanceLock()) {
       colonyPurchases(hub(), projectId(id), order === 'closest' ? 'closest' : undefined),
     );
     ipcMain.handle('colonyPlanReview', (_e, id: unknown) => colonyPlanReview(hub(), projectId(id)));
+    // Advice about a SYSTEM rather than a plan, so it takes a name and not an id.
+    ipcMain.handle('colonySystemAdvice', (_e, systemName: unknown) =>
+      colonySystemAdvice(hub(), typeof systemName === 'string' ? systemName : ''),
+    );
     ipcMain.handle('colonyDeclarePurchase', (_e, id: unknown, body: unknown) =>
       colonyDeclarePurchase(
         hub(),

@@ -3010,6 +3010,50 @@ export const getColonyPlan = (
 ): Promise<AdminRead<{ plan: ColonyPlan; can: { edit: boolean } }>> =>
   getAdmin(`/v1/logistics/colony/plans/${encodeURIComponent(id)}`);
 
+export interface SystemRoleFit {
+  role: string;
+  score: number;
+  /** Computed from the survey, never model-written. Safe to show as fact. */
+  reasons: string[];
+  /** Shown even when the score is high — a remote system says so beside its own strengths. */
+  against: string[];
+}
+
+export interface SystemAdvice {
+  systemName: string;
+  profile: {
+    bodyCount: number;
+    landable: number;
+    ringed: number;
+    gasGiants: number;
+    highMetal: number;
+    icy: number;
+    waterWorlds: number;
+    terraformCandidates: number;
+    nearestLs: number | null;
+    farthestLs: number | null;
+    remote: boolean;
+    surfaceCapacity: number;
+  } | null;
+  fits: SystemRoleFit[];
+  bloc: { name: string; gaps: Array<{ role: string; why: string }> } | null;
+  decidedRole: string | null;
+  /** The assistant's paragraphs. Empty when it could not be reached. */
+  advice: string;
+  /**
+   * Exactly what the assistant was told.
+   *
+   * Shown beside the advice on purpose: a recommendation that reads well and is wrong is worse than
+   * none, so a member who doubts it can see the input and settle it themselves.
+   */
+  facts: string;
+  unavailable: string | null;
+}
+
+/** What a system should be built as, from its survey and its bloc. */
+export const getSystemAdvice = (systemName: string): Promise<AdminRead<SystemAdvice>> =>
+  getAdmin(`/v1/logistics/colony/systems/${encodeURIComponent(systemName)}/advice`);
+
 export const getBuildTypes = (): Promise<AdminRead<{ buildTypes: ColonyBuildType[] }>> =>
   getAdmin('/v1/logistics/colony/build-types');
 

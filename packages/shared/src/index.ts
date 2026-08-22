@@ -38,7 +38,7 @@ export { scopeHold } from './hold-scope.js';
 export type { HeldLine, ProjectWant } from './hold-scope.js';
 export { isOrbitalStation } from './station-orbital.js';
 export { renderBuildBook } from './build-book.js';
-export type { BookPlan, BookSite } from './build-book.js';
+export type { BookAdvice, BookPlan, BookSite } from './build-book.js';
 export { completedBuilds } from './build-completion-watch.js';
 export type { WatchedBuild, StationSighting, CompletedBuild } from './build-completion-watch.js';
 export { buyBandLabel, rankBuySources } from './buy-priority.js';

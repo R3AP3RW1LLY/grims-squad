@@ -7,7 +7,8 @@ import {
   StatTile,
 } from '../../../../../components/hub-page';
 import { NoAccess, AdminUnavailable } from '../../../app/no-access';
-import { getBuildTypes, getColonyPlan } from '../../../../../lib/api';
+import { getBuildTypes, getColonyPlan, getSystemAdvice } from '../../../../../lib/api';
+import { SystemAdvicePanel } from './system-advice';
 import { CopySystem } from '../../../../../components/copy-system';
 import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
 import { SystemTree } from './system-tree';
@@ -81,6 +82,21 @@ export default async function PlanPage({
    * not finished rather than one that is waiting.
    */
   const [read, catalogue] = await Promise.all([getColonyPlan(id), getBuildTypes()]);
+
+  /*
+   * ★ FETCHED AFTER THE PLAN, NOT BESIDE IT ★
+   *
+   * The advice needs the system NAME, which only the plan carries — and it does a survey lookup and
+   * may call the assistant, so it is the slowest thing on this page. Running it in the same
+   * Promise.all would mean the plan itself waited on an answer nobody has asked to see yet.
+   *
+   * Fails soft, like every advisory read on this platform: a plan with no advice is worth far more
+   * than no plan.
+   */
+  const advice =
+    read.state === 'ok' && read.data.plan.systemName
+      ? await getSystemAdvice(read.data.plan.systemName).catch(() => null)
+      : null;
 
   if (read.state === 'forbidden') {
     return <NoAccess what="colonisation" permission="COLONY_VIEW" />;
@@ -222,6 +238,7 @@ export default async function PlanPage({
         {tab !== 'system' ? null : (
           <Section title="The system">
             <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
+            {advice !== null && advice.state === 'ok' && <SystemAdvicePanel advice={advice.data} />}
           </Section>
         )}
 

@@ -1049,6 +1049,46 @@ export const postColonyProject = (
 export const colonyPlans = (call: HubCall): Promise<Answer<{ plans: ColonyPlan[] }>> =>
   hubColony(call, '/plans');
 
+export interface SystemRoleFit {
+  readonly role: string;
+  readonly score: number;
+  readonly reasons: readonly string[];
+  readonly against: readonly string[];
+}
+
+export interface SystemAdvice {
+  readonly systemName: string;
+  readonly profile: {
+    readonly bodyCount: number;
+    readonly landable: number;
+    readonly ringed: number;
+    readonly waterWorlds: number;
+    readonly terraformCandidates: number;
+    readonly nearestLs: number | null;
+    readonly remote: boolean;
+    readonly surfaceCapacity: number;
+  } | null;
+  readonly fits: readonly SystemRoleFit[];
+  readonly bloc: { readonly name: string; readonly gaps: ReadonlyArray<{ role: string; why: string }> } | null;
+  readonly decidedRole: string | null;
+  readonly advice: string;
+  readonly facts: string;
+  readonly unavailable: string | null;
+}
+
+/**
+ * What a system should be built as, from its survey and its bloc.
+ *
+ * The same endpoint the website reads, so the app and the site cannot recommend different things
+ * about one system — the owner's mirror rule, and the reason this is a hub call rather than
+ * anything computed on this machine.
+ */
+export const colonySystemAdvice = (
+  call: HubCall,
+  systemName: string,
+): Promise<Answer<SystemAdvice>> =>
+  hubColony(call, `/systems/${encodeURIComponent(systemName)}/advice`);
+
 export const colonyPlan = (
   call: HubCall,
   id: string,

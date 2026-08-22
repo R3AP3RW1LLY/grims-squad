@@ -22,6 +22,7 @@ import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService, carrierCover, carrierHoldLines } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
+import { SystemAdvisorService } from './system-advisor.service.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -69,6 +70,8 @@ export class ColonyDeviceController {
     // The shopping route. The same instance the website's controller uses, so "where do I fly for
     // this" has one answer rather than one per surface.
     @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
+    // What a system should be built as. The same instance the website's controller uses.
+    @Inject(SystemAdvisorService) private readonly advisor: SystemAdvisorService,
     /*
      * Where the caller was last seen.
      *
@@ -494,6 +497,29 @@ export class ColonyDeviceController {
    *
    * COLONY_MANAGE on all three, exactly as on the website. One rule, reached through two doors.
    */
+  /**
+   * What a system should be built as, from the app.
+   *
+   * ★ THE SAME ENDPOINT SHAPE THE WEBSITE SERVES ★
+   *
+   * The app and the site must not recommend different things about one system, so both read one
+   * service. The parity spec caught this route missing the moment the companion started calling it,
+   * which is what that spec is for.
+   *
+   * COLONY_VIEW: this is advice, it changes nothing, and the member deciding whether a system is
+   * worth hauling to is usually not an officer.
+   */
+  @Public()
+  @Get('systems/:name/advice')
+  async systemAdvice(@Req() req: FastifyRequest, @Param('name') name: string) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return this.advisor.advise(decodeURIComponent(name));
+  }
+
   @Public()
   @Get('station-claims')
   async stationClaims(@Req() req: FastifyRequest) {
