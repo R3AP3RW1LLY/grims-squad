@@ -13,6 +13,7 @@ import { runSpanshWatch } from './jobs/spansh-watch.js';
 import { spanshWatchDeps } from './jobs/spansh-watch.wiring.js';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
+import { startCompanionWindows } from './jobs/companion-window.js';
 import { initialPoll, nextPoll } from '@grims/shared';
 import { announcePendingColonyProjects, PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { TokenCipher, createKeyring } from '@grims/shared/server';
@@ -356,6 +357,7 @@ function startScheduler(db: PrismaClient): void {
   startRoleSync(db);
   startCapiJournalPoll(db);
   startCapiCarrierPoll(db);
+  startCompanionWindows(db);
   startBuildCompletionWatch(db);
   startPlanDivergenceCorrection(db);
   startSpanshWatch(db);

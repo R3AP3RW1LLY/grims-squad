@@ -261,14 +261,22 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
    * Nothing pulls this. Paired companions PUSH systems as members fly, so there is no "companion
    * ingest" to start; `RESIDENT` in the worker's scheduler is what keeps it from being started.
    *
-   * The number is therefore a staleness alarm: 24 hours without a single member reporting a system
-   * means the pairing path has stopped, which is worth knowing and is otherwise invisible.
+   * ★ ONE HOUR, AND IT IS AN ALARM — SQUADRON OWNER, 2026-08-22 ★
    *
-   * It was `0` first, which broke three scheduler tests and deserved to. Zero does not read as
-   * "never pulls" — it reads as "due right now, and again next tick, for ever", and it collapsed
-   * the shortest-cadence check that keeps TICK_MS honest.
+   * "we need this to work just like the realtime ingestion of market prices ... make it work
+   * exactly like the worker we built for: Live markets"
+   *
+   * So it works exactly like `eddn` above. The worker closes a reporting window every fifteen
+   * minutes (COMPANION_WINDOW_MINUTES) whether or not anybody is flying, so four are expected inside
+   * the hour and "overdue" can only mean the reporting itself has stopped.
+   *
+   * It was 24 first, which is not an alarm — it is a whole day in which the pairing path could be
+   * dead and the page would look content. And it was `0` before that, which broke three scheduler
+   * tests and deserved to: zero does not read as "never pulls", it reads as "due right now, and
+   * again next tick, for ever", and it collapsed the shortest-cadence check that keeps TICK_MS
+   * honest.
    */
-  companion: 24,
+  companion: 1,
 };
 
 /** What the training page shows for one source. */
