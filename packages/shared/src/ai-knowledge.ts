@@ -423,3 +423,35 @@ export const SOURCE_ANSWERS: Record<KnowledgeSource, string> = {
   forum: 'Questions this squadron has already answered',
   companion: 'Systems the squadron has actually visited, as their companions reported them',
 };
+
+/**
+ * Rows that describe a PLACE rather than an idea.
+ *
+ * ★ THE INVARIANT THAT QUIETLY STOPPED BEING TRUE — 2026-08-22 ★
+ *
+ * `KnowledgeService.semantic` carried this comment for months, and it was correct when written:
+ *
+ *     "Restricted to embedded sources by construction: the query returns rows whose embedding is
+ *      not null, and only prose sources are ever embedded (see STORAGE_KIND)."
+ *
+ * Then the squadron owner asked for full EDDN coverage and 687,000 systems and stations were
+ * embedded. The comment stayed. The code stayed. The invariant it depended on was gone.
+ *
+ * The result, measured in production: "how do I become a member of the squadron" returned five
+ * system names. Not because retrieval was wrong — because 302 prose rows were being asked to
+ * compete with 687,000 places inside one approximate index, and approximate search lost them.
+ *
+ * ★ SO THE SEPARATION IS ENFORCED, NOT ASSUMED ★
+ *
+ * A prose question searches prose. A place question searches places. Neither can drown the other,
+ * however many systems the galaxy import adds — and it will add millions. This list is what makes
+ * that structural rather than a tuning parameter somebody has to keep ahead of.
+ */
+export const PLACE_KINDS = ['system', 'station', 'visited-system', 'visited-station'] as const;
+
+export type PlaceKind = (typeof PLACE_KINDS)[number];
+
+/** True for a row describing somewhere you can fly to. */
+export function isPlaceKind(kind: string): boolean {
+  return (PLACE_KINDS as readonly string[]).includes(kind);
+}
