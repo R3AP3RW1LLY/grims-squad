@@ -1401,6 +1401,79 @@ function Suggestion({
  * the order those two facts are read in decides which one somebody acts on. Over a cockpit, with a
  * strip this narrow, that ordering is the whole design.
  */
+/** "Draft me a starting layout" — the opt-in half, and nothing it produces touches the plan. */
+function DraftLayout({ systemName }: { systemName: string }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<import('../hub-colony.js').DraftedLayout | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const draft = (): void => {
+    setBusy(true);
+    void window.colony.draftLayout(systemName).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setOut(a.data);
+        setError(null);
+      } else {
+        setError(a.error);
+      }
+    });
+  };
+
+  return (
+    <div style={{ marginTop: '4px' }}>
+      <Button disabled={busy} onClick={draft}>
+        {busy ? 'Laying one out…' : 'Draft me a starting layout'}
+      </Button>
+
+      {error === null ? null : <Problem>{error}</Problem>}
+
+      {out === null ? null : (
+        <div style={{ marginTop: '8px' }}>
+          {/* The verdict before the list, for the reason in the block above. */}
+          {out.report !== null && !out.report.ok ? (
+            <Card>
+              <p style={{ margin: '0 0 4px', fontSize: '12px', color: C.warn }}>
+                This draft does not pass the plan checker.
+              </p>
+              {out.report.errors.map((issue) => (
+                <p key={`${issue.code}-${issue.step}`} style={{ margin: '0 0 2px', fontSize: '11px', color: C.warn }}>
+                  {issue.message}
+                </p>
+              ))}
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.faint }}>
+                Shown anyway — a draft you can see the faults in is worth more than one that was
+                quietly tidied up.
+              </p>
+            </Card>
+          ) : null}
+
+          {out.report !== null && out.report.ok ? (
+            <p style={{ margin: '0 0 6px', fontSize: '12px', color: C.good }}>
+              Passes the plan checker — {out.report.totalTonnes.toLocaleString()} t in total.
+            </p>
+          ) : null}
+
+          {out.steps.map((step, i) => (
+            <p key={`${step.typeId}-${step.bodyId}-${i}`} style={{ margin: '0 0 3px', fontSize: '12px', color: C.text }}>
+              <span style={{ color: C.faint }}>{i + 1}.</span> {step.typeId}
+              <span style={{ marginLeft: '6px', fontSize: '11px', color: C.dim }}>{step.bodyName}</span>
+              {step.why === '' ? null : (
+                <span style={{ display: 'block', fontSize: '11px', color: C.faint }}>{step.why}</span>
+              )}
+            </p>
+          ))}
+
+          {out.unavailable === null ? null : (
+            <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.faint }}>{out.unavailable}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function SystemAdvice({ systemName }: { systemName: string }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<import('../hub-colony.js').SystemAdvice | null>(null);
@@ -1508,6 +1581,17 @@ function SystemAdvice({ systemName }: { systemName: string }): JSX.Element {
           {out.unavailable === null ? null : (
             <p style={{ margin: 0, fontSize: '11px', color: C.faint }}>{out.unavailable}</p>
           )}
+
+          {/*
+            ★ THE DRAFT, AND THE CHECKER'S VERDICT WITH IT ★
+
+            A drafted layout is dangerous precisely because it looks authoritative: an ordered list
+            of real structures on real bodies reads as a plan whether or not it obeys the tier
+            economy. So the checker's answer is shown FIRST and a failing draft is still shown —
+            a member who can see "step 4 spends a point that has not been banked" learns something;
+            a member handed a silently repaired list learns nothing.
+          */}
+          <DraftLayout systemName={systemName} />
 
           {/*
             What the assistant was told, verbatim. The same reasoning the plan review beside this

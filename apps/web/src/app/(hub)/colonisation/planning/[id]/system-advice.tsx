@@ -1,4 +1,5 @@
 import type { SystemAdvice } from '../../../../../lib/api';
+import { DraftLayout } from './draft-layout';
 
 /**
  * What this system should be built as, and why.
@@ -33,7 +34,20 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-export function SystemAdvicePanel({ advice }: { advice: SystemAdvice }) {
+export function SystemAdvicePanel({
+  advice,
+  canDraft = false,
+}: {
+  advice: SystemAdvice;
+  /**
+   * Whether to offer the drafting button.
+   *
+   * Off by default, and off on the scout page: drafting a layout for a system nobody has claimed is
+   * an assistant call spent on a decision that has not been made. On the planning page, where
+   * somebody is already laying the system out, it is exactly what they want.
+   */
+  canDraft?: boolean;
+}) {
   const p = advice.profile;
 
   return (
@@ -166,6 +180,8 @@ export function SystemAdvicePanel({ advice }: { advice: SystemAdvice }) {
             advice they have to trust, and this platform has repeatedly found it should not have
             asked for trust.
           */}
+          {canDraft && advice.profile !== null && <DraftLayout systemName={advice.systemName} />}
+
           {advice.facts !== '' && (
             <details className="text-xs">
               <summary className="cursor-pointer text-[var(--color-text-secondary)]">

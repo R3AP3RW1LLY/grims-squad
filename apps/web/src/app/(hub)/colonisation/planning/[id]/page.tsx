@@ -238,7 +238,9 @@ export default async function PlanPage({
         {tab !== 'system' ? null : (
           <Section title="The system">
             <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
-            {advice !== null && advice.state === 'ok' && <SystemAdvicePanel advice={advice.data} />}
+            {advice !== null && advice.state === 'ok' && (
+              <SystemAdvicePanel advice={advice.data} canDraft={canEdit} />
+            )}
           </Section>
         )}
 

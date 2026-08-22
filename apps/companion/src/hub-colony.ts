@@ -1089,6 +1089,28 @@ export const colonySystemAdvice = (
 ): Promise<Answer<SystemAdvice>> =>
   hubColony(call, `/systems/${encodeURIComponent(systemName)}/advice`);
 
+export interface DraftedLayout {
+  readonly steps: ReadonlyArray<{ typeId: string; bodyId: number; bodyName: string; why: string }>;
+  readonly report: {
+    readonly ok: boolean;
+    readonly errors: ReadonlyArray<{ code: string; step: number; message: string }>;
+    readonly warnings: ReadonlyArray<{ code: string; step: number; message: string }>;
+    readonly totalTonnes: number;
+  } | null;
+  readonly unavailable: string | null;
+}
+
+/**
+ * A first layout for a system, proposed and then ruled on by the plan checker.
+ *
+ * POST because it spends an assistant call: nothing drafts unless somebody presses the button.
+ */
+export const colonyDraftLayout = (
+  call: HubCall,
+  systemName: string,
+): Promise<Answer<DraftedLayout>> =>
+  hubColony(call, `/systems/${encodeURIComponent(systemName)}/draft`, { method: 'POST', body: {} });
+
 export const colonyPlan = (
   call: HubCall,
   id: string,

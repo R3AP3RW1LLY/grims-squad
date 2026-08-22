@@ -6,6 +6,7 @@ import type {
   BuildTypeRow,
   CarrierMatch,
   ColonyPlan,
+  DraftedLayout,
   RosterEntry,
   StationClaim,
   SystemAdvice,
@@ -237,6 +238,8 @@ declare global {
        * before anybody has laid out a plan for it, which is the point on the scout page.
        */
       systemAdvice(systemName: string): Promise<Answer<SystemAdvice>>;
+      /** A proposed layout, with the plan checker's verdict attached. POST — it spends a model call. */
+      draftLayout(systemName: string): Promise<Answer<DraftedLayout>>;
       planReorder(
         id: string,
         body: { version: number; siteIds: string[] },
