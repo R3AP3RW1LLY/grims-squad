@@ -1383,6 +1383,248 @@ function Suggestion({
  * fact from a generated sentence — and the only way somebody looking at a review that seems wrong
  * can tell whether the data was wrong or the model was.
  */
+/**
+ * What this system should be built as, and why.
+ *
+ * ★ THE OWNER'S MIRROR RULE — SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "ensure the Companion app matches and has all the same pages in colonization that the website has
+ * please! must be a mirror!"
+ *
+ * It reads the SAME endpoint the website reads rather than computing anything here, so the app and
+ * the site cannot recommend different things about one system. Two answers to "what is this system
+ * for" is how a squadron ends up hauling two ways.
+ *
+ * ★ THE WARNINGS LEAD ★
+ *
+ * A system with four ringed gas giants 194,000 Ls out is a good mining system and a bad build, and
+ * the order those two facts are read in decides which one somebody acts on. Over a cockpit, with a
+ * strip this narrow, that ordering is the whole design.
+ */
+/** "Draft me a starting layout" — the opt-in half, and nothing it produces touches the plan. */
+function DraftLayout({ systemName }: { systemName: string }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<import('../hub-colony.js').DraftedLayout | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const draft = (): void => {
+    setBusy(true);
+    void window.colony.draftLayout(systemName).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setOut(a.data);
+        setError(null);
+      } else {
+        setError(a.error);
+      }
+    });
+  };
+
+  return (
+    <div style={{ marginTop: '4px' }}>
+      <Button disabled={busy} onClick={draft}>
+        {busy ? 'Laying one out…' : 'Draft me a starting layout'}
+      </Button>
+
+      {error === null ? null : <Problem>{error}</Problem>}
+
+      {out === null ? null : (
+        <div style={{ marginTop: '8px' }}>
+          {/* The verdict before the list, for the reason in the block above. */}
+          {out.report !== null && !out.report.ok ? (
+            <Card>
+              <p style={{ margin: '0 0 4px', fontSize: '12px', color: C.warn }}>
+                This draft does not pass the plan checker.
+              </p>
+              {out.report.errors.map((issue) => (
+                <p key={`${issue.code}-${issue.step}`} style={{ margin: '0 0 2px', fontSize: '11px', color: C.warn }}>
+                  {issue.message}
+                </p>
+              ))}
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.faint }}>
+                Shown anyway — a draft you can see the faults in is worth more than one that was
+                quietly tidied up.
+              </p>
+            </Card>
+          ) : null}
+
+          {out.report !== null && out.report.ok ? (
+            <p style={{ margin: '0 0 6px', fontSize: '12px', color: C.good }}>
+              Passes the plan checker — {out.report.totalTonnes.toLocaleString()} t in total.
+            </p>
+          ) : null}
+
+          {out.steps.map((step, i) => (
+            <p key={`${step.typeId}-${step.bodyId}-${i}`} style={{ margin: '0 0 3px', fontSize: '12px', color: C.text }}>
+              <span style={{ color: C.faint }}>{i + 1}.</span> {step.typeId}
+              <span style={{ marginLeft: '6px', fontSize: '11px', color: C.dim }}>{step.bodyName}</span>
+              {step.why === '' ? null : (
+                <span style={{ display: 'block', fontSize: '11px', color: C.faint }}>{step.why}</span>
+              )}
+            </p>
+          ))}
+
+          {out.unavailable === null ? null : (
+            <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.faint }}>{out.unavailable}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function SystemAdvice({ systemName }: { systemName: string }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<import('../hub-colony.js').SystemAdvice | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showFacts, setShowFacts] = useState(false);
+
+  const ask = (): void => {
+    setBusy(true);
+    void window.colony.systemAdvice(systemName).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setOut(a.data);
+        setError(null);
+      } else {
+        setError(a.error);
+      }
+    });
+  };
+
+  const p = out?.profile ?? null;
+
+  return (
+    <Section title="What this system is for">
+      {out === null ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Button tone="primary" disabled={busy} onClick={ask}>
+            {busy ? 'Reading the survey…' : 'What should we build here?'}
+          </Button>
+          <span style={{ fontSize: '11px', color: C.dim }}>
+            Reads the system survey and what the squadron has already built nearby.
+          </span>
+        </div>
+      ) : null}
+
+      {error === null ? null : <Problem>{error}</Problem>}
+
+      {/*
+        Both checked, not just the derived one: narrowing `p` does not tell TypeScript anything about
+        `out`, and the block below reads both.
+      */}
+      {out === null || p === null ? null : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+          {/* Both warnings first, for the reason in the header above. */}
+          {p.remote ? (
+            <Card>
+              <p style={{ margin: 0, fontSize: '12px', color: C.warn }}>
+                <strong>Every body here is {Math.round((p.nearestLs ?? 0) / 1000).toLocaleString()},000 Ls out.</strong>{' '}
+                The supercruise, not the resource, decides whether this is worth building.
+              </p>
+            </Card>
+          ) : null}
+          {p.surfaceCapacity <= 1 ? (
+            <Card>
+              <p style={{ margin: 0, fontSize: '12px', color: C.warn }}>
+                <strong>Only {p.surfaceCapacity} landable body.</strong> Settlements are surface
+                builds, so almost everything here has to be built in orbit.
+              </p>
+            </Card>
+          ) : null}
+
+          <Card>
+            <p style={{ margin: '0 0 6px', fontSize: '11px', color: C.dim }}>
+              {p.bodyCount} bodies · {p.landable} landable · {p.ringed} ringed
+              {p.waterWorlds > 0 ? ` · ${p.waterWorlds} water world` : ''}
+              {out.decidedRole === null ? '' : ` · designated ${out.decidedRole}`}
+            </p>
+            {out.fits.slice(0, 3).map((fit) => (
+              <div key={fit.role} style={{ marginBottom: '6px' }}>
+                <span style={{ fontSize: '13px', color: C.text }}>{fit.role}</span>
+                <span style={{ marginLeft: '8px', fontSize: '10px', color: C.faint }}>{fit.score}</span>
+                {fit.reasons.length === 0 ? null : (
+                  <div style={{ fontSize: '11px', color: C.dim }}>{fit.reasons.join(' · ')}</div>
+                )}
+                {fit.against.map((against) => (
+                  <div key={against} style={{ fontSize: '11px', color: C.warn }}>
+                    {against}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </Card>
+
+          {out.bloc !== null && out.bloc.gaps.length > 0 ? (
+            <Card>
+              <p style={{ margin: '0 0 4px', fontSize: '11px', color: C.dim }}>
+                {out.bloc.name} is missing
+              </p>
+              {out.bloc.gaps.map((gap) => (
+                <p key={gap.role} style={{ margin: '0 0 3px', fontSize: '12px', color: C.text }}>
+                  <strong>{gap.role}</strong>{' '}
+                  <span style={{ color: C.dim }}>{gap.why}</span>
+                </p>
+              ))}
+            </Card>
+          ) : null}
+
+          {out.advice === '' ? null : (
+            <Card>
+              <p style={{ margin: 0, fontSize: '12px', color: C.text, whiteSpace: 'pre-wrap' }}>
+                {out.advice}
+              </p>
+            </Card>
+          )}
+
+          {out.unavailable === null ? null : (
+            <p style={{ margin: 0, fontSize: '11px', color: C.faint }}>{out.unavailable}</p>
+          )}
+
+          {/*
+            ★ THE DRAFT, AND THE CHECKER'S VERDICT WITH IT ★
+
+            A drafted layout is dangerous precisely because it looks authoritative: an ordered list
+            of real structures on real bodies reads as a plan whether or not it obeys the tier
+            economy. So the checker's answer is shown FIRST and a failing draft is still shown —
+            a member who can see "step 4 spends a point that has not been banked" learns something;
+            a member handed a silently repaired list learns nothing.
+          */}
+          <DraftLayout systemName={systemName} />
+
+          {/*
+            What the assistant was told, verbatim. The same reasoning the plan review beside this
+            uses: it is the only way to tell a retrieved fact from a generated sentence.
+          */}
+          {out.facts === '' ? null : (
+            <div>
+              <Button onClick={() => setShowFacts(!showFacts)}>
+                {showFacts ? 'Hide what this came from' : 'What this came from'}
+              </Button>
+              {showFacts ? (
+                <pre
+                  style={{
+                    marginTop: '6px',
+                    padding: '8px',
+                    background: C.sunken,
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    color: C.dim,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {out.facts}
+                </pre>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function PlanReview({ planId }: { planId: string }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<{
@@ -1830,6 +2072,7 @@ function BuildOrder({
       {/* Under the verdict, where "what is wrong with this plan" already lives. */}
       <div style={{ marginBottom: '12px' }}>
         <PlanReview planId={plan.id} />
+        {plan.systemName ? <SystemAdvice systemName={plan.systemName} /> : null}
       </div>
 
       <Suggestion plan={plan} canEdit={canEdit} busy={busy} onApply={saveOrder} />

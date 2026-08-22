@@ -297,6 +297,8 @@ contextBridge.exposeInMainWorld('colony', {
   withdrawStationClaim: (key: string) => ipcRenderer.invoke('colonyWithdrawStationClaim', key),
   /** Asks the assistant what is wrong with a plan, from the simulation's own findings. */
   planReview: (id: string) => ipcRenderer.invoke('colonyPlanReview', id),
+  systemAdvice: (systemName: string) => ipcRenderer.invoke('colonySystemAdvice', systemName),
+  draftLayout: (systemName: string) => ipcRenderer.invoke('colonyDraftLayout', systemName),
   declarePurchase: (id: string, body: unknown) =>
     ipcRenderer.invoke('colonyDeclarePurchase', id, body),
 

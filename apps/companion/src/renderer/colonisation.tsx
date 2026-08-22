@@ -6,8 +6,10 @@ import type {
   BuildTypeRow,
   CarrierMatch,
   ColonyPlan,
+  DraftedLayout,
   RosterEntry,
   StationClaim,
+  SystemAdvice,
   ColonyHauler,
   ColonyNeed,
   ColonyProject,
@@ -231,6 +233,13 @@ declare global {
       planReview(
         id: string,
       ): Promise<Answer<{ review: string; facts: string; unavailable: string | null }>>;
+      /**
+       * What a SYSTEM should be built as. Takes a name, not a plan id — a system can be advised on
+       * before anybody has laid out a plan for it, which is the point on the scout page.
+       */
+      systemAdvice(systemName: string): Promise<Answer<SystemAdvice>>;
+      /** A proposed layout, with the plan checker's verdict attached. POST — it spends a model call. */
+      draftLayout(systemName: string): Promise<Answer<DraftedLayout>>;
       planReorder(
         id: string,
         body: { version: number; siteIds: string[] },

@@ -286,8 +286,23 @@ describe('P0.2 database schema', () => {
      *
      * Not a column on `knowledge_items`: that table is a mirror of the galaxy dump and the importer
      * rewrites every row, so a claim there would last until the next import.
+     *
+     * 135 as of 2026-08-22: `colony_blocs` and `colony_bloc_systems`. A named group of systems the
+     * squadron treats as one economy, so the planning advisor can see what the whole chain is
+     * missing rather than only what one system holds.
+     *
+     * That is the finding no single-system view can produce: the squadron refines ore in c2-12 and
+     * builds high tech in c2-16, and nothing between them turned refined metal into components — so
+     * both ends traded outside the squadron for the middle step. It is a property of the SET.
+     *
+     * Two tables rather than one because a bloc has a name and a note of its own, and because the
+     * ROLE lives on the membership: what officers DECIDED a system will be, which is a different
+     * fact from what its bodies suggest and the one the gap analysis has to count.
+     *
+     * Inferring the grouping from distance was considered and dropped — the squadron's own idea of
+     * which systems belong together is not a radius.
      */
-    expect(Number(r[0]?.n)).toBe(133);
+    expect(Number(r[0]?.n)).toBe(135);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

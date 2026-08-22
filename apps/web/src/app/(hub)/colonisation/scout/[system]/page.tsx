@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageHeader, PageBody, Section, CouldNotLoad } from '../../../../../components/hub-page';
 import { NoAccess } from '../../../app/no-access';
-import { getSystemSurvey, getMe } from '../../../../../lib/api';
+import { getSystemSurvey, getMe, getSystemAdvice } from '../../../../../lib/api';
+import { SystemAdvicePanel } from '../../planning/[id]/system-advice';
 import { formatLocal } from '../../../../../lib/time';
 
 /**
@@ -41,6 +42,19 @@ export default async function SurveyPage({ params }: { params: Promise<{ system:
    */
   const me = await getMe();
   const viewerTz = me.user?.timezone ?? 'UTC';
+
+  /*
+   * ★ WHAT THIS SYSTEM COULD BE, BEFORE ANYBODY CLAIMS IT ★
+   *
+   * Squadron owner, 2026-08-18: the same advice the planning page gives, on the page where the
+   * decision is actually made. Planning lays out a system somebody already chose; this is the
+   * choosing, and "four ringed gas giants but every body is 194,000 Ls out" is worth far more here
+   * than it is after the permit has been bought.
+   *
+   * Fetched after the survey and failing soft: a candidate with no advice is still worth reading
+   * about, and the advisor may call an assistant that lives on a machine in the owner's house.
+   */
+  const advice = await getSystemAdvice(name).catch(() => null);
 
   if (read.state === 'forbidden') {
     return <NoAccess what="colonisation" permission="COLONY_VIEW" />;
@@ -210,6 +224,12 @@ export default async function SurveyPage({ params }: { params: Promise<{ system:
             {s.fetchedAt === null ? '' : ` · surveyed ${formatLocal(s.fetchedAt, viewerTz, { withTime: false })}`}
           </p>
         </Section>
+
+        {/*
+          What this system could be built as. On the page where the decision is made rather than
+          after the permit has been bought.
+        */}
+        {advice !== null && advice.state === 'ok' && <SystemAdvicePanel advice={advice.data} />}
       </PageBody>
     </>
   );

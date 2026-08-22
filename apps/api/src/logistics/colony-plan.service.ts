@@ -13,7 +13,10 @@ import {
   type PredictedMarket,
   type SimBuildType,
   type SimResult,
+  profileSystem,
   renderBuildBook,
+  scoreRoles,
+  type BookAdvice,
 } from '@grims/shared';
 import { fetchSystemBodies, type EdsmSystemBodies } from '@grims/ed-clients';
 import {
@@ -497,12 +500,74 @@ export class ColonyPlanService {
         built: s.projectId !== null && s.projectId !== undefined,
       }));
 
+    /*
+     * ★ THE REASONING GOES IN THE BOOK, NOT JUST ON THE PAGE ★
+     *
+     * Squadron owner, 2026-08-18. A printed sheet is read away from the screen with nobody to ask,
+     * so it is the one place the "why" matters most — and the place it was missing.
+     *
+     * Optional and failing soft: a book for an unsurveyed system still prints its build order, and
+     * the advisor may reach for an assistant that lives on a machine in the owner's house.
+     */
+    const advice = await this.#bookAdvice(plan.systemName).catch(() => undefined);
+
     return renderBuildBook({
       systemName: plan.systemName,
       architect: plan.postedBy ?? 'the squadron',
       generatedAt: now,
       sites,
+      ...(advice === undefined ? {} : { advice }),
     });
+  }
+
+/**
+   * The reasoning that goes at the front of a printed book.
+   *
+   * ★ COMPUTED HERE RATHER THAN ASKED OF THE ADVISOR, AND THAT IS DELIBERATE ★
+   *
+   * `SystemAdvisorService` depends on THIS service for its survey, so calling it from here would
+   * close a cycle — the same shape as the AiModule cycle that crash-looped the API in August and
+   * was invisible to every test in the repository because nothing loads the real module graph.
+   *
+   * It also happens to be the better book. These are the COMPUTED facts — counts, distances, role
+   * scores — which are the half a member can check against the system map. A printed sheet is read
+   * with nobody to ask, so the verifiable half is the half worth printing, and it needs no
+   * assistant to be reachable at the moment somebody hits print.
+   */
+  async #bookAdvice(systemName: string): Promise<BookAdvice | undefined> {
+    const { system } = await this.bodies(systemName);
+    if (system === null || system.bodies.length === 0) return undefined;
+
+    const profile = profileSystem(
+      system.bodies.map((b) => ({
+        name: b.name,
+        kind: b.subType ?? b.kind,
+        isLandable: b.isLandable,
+        hasRings: b.hasRings,
+        isTerraformCandidate: b.terraformable,
+        distanceLs: b.distanceLs,
+        gravity: b.gravity,
+        temperatureK: b.temperature,
+      })),
+    );
+
+    const fits = scoreRoles(profile);
+    const best = fits[0];
+    if (best === undefined) return undefined;
+
+    /*
+     * The objections from EVERY role that scored, not only the best one — a member reading the book
+     * may build the second choice, and the reason not to is the same either way.
+     */
+    const warnings = [...new Set(fits.flatMap((f) => f.against))];
+
+    return {
+      headline: `Best suited to ${best.role}`,
+      reasons: best.reasons,
+      warnings,
+      // No assistant on this path: see the note above. The prose lives on the planning page.
+      prose: '',
+    };
   }
 
   async byId(id: string, callerId: string): Promise<PlanDetail | null> {

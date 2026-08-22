@@ -41,6 +41,35 @@ export interface BookPlan {
   readonly architect: string;
   readonly generatedAt: Date;
   readonly sites: readonly BookSite[];
+  /**
+   * What this system is for, and what would make it a bad idea.
+   *
+   * ★ SQUADRON OWNER, 2026-08-18 ★
+   *
+   * The books written by hand for the Col 285 systems led with the reasoning and only then gave the
+   * build order, because somebody reading a printed sheet in a cockpit needs to know WHY before
+   * they need to know what is next.
+   *
+   * Optional: a plan for a system nobody has surveyed still prints its build order, and a book that
+   * refused to render without advice would be worse than one that renders without it.
+   */
+  readonly advice?: BookAdvice | undefined;
+}
+
+/** The reasoning half of a book. Computed facts and, where there is one, the assistant's paragraph. */
+export interface BookAdvice {
+  readonly headline: string | null;
+  /** Computed from the survey, so it is safe to print as fact. */
+  readonly reasons: readonly string[];
+  /**
+   * Printed in their OWN block rather than mixed into the reasons.
+   *
+   * A book is read away from the screen, with nobody to ask. "Four ringed gas giants" and "every
+   * body is 194,000 Ls out" are both true and only one of them decides whether to go — so the
+   * objection cannot be a bullet among strengths.
+   */
+  readonly warnings: readonly string[];
+  readonly prose: string;
 }
 
 /**
@@ -59,6 +88,58 @@ const esc = (s: string): string =>
 
 /** Six digits unspaced are misread, and these are the numbers people plan hauling runs around. */
 const num = (n: number): string => Number(n).toLocaleString('en-GB');
+
+/**
+ * The reasoning, printed before the build order.
+ *
+ * ★ WHY IT COMES FIRST ★
+ *
+ * The books written by hand for the Col 285 systems opened with what the system is FOR and only
+ * then listed what to build, because a printed sheet is read away from the screen with nobody to
+ * ask. Somebody who knows why they are going can adapt when the plan meets reality; somebody
+ * holding an ordered list cannot.
+ *
+ * ★ AND WHY THE WARNINGS ARE THEIR OWN BLOCK ★
+ *
+ * "Four ringed gas giants" and "every body is 194,000 Ls out" are both true, and only one of them
+ * decides whether to go. Mixed into a list of strengths the objection reads as a caveat; on its own,
+ * above the build order, it reads as what it is.
+ *
+ * Empty string when there is no advice — a plan for an unsurveyed system still prints its builds.
+ */
+function renderAdvice(advice: BookAdvice | undefined): string {
+  if (advice === undefined) return '';
+
+  const warnings =
+    advice.warnings.length === 0
+      ? ''
+      : `<div class="warn"><strong>Before you commit to this system</strong><ul>${advice.warnings
+          .map((w) => `<li>${esc(w)}</li>`)
+          .join('')}</ul></div>`;
+
+  const reasons =
+    advice.reasons.length === 0
+      ? ''
+      : `<ul class="reasons">${advice.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`;
+
+  const prose =
+    advice.prose === ''
+      ? ''
+      : `<div class="prose">${advice.prose
+          // Split on a regex, not a newline literal: writing this file through a shell heredoc ate
+          // the escape and left an unterminated string. Same trap the bytea guard records.
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== '')
+          .map((line) => `<p>${esc(line)}</p>`)
+          .join('')}</div>`;
+
+  return `<section class="advice">
+    ${advice.headline === null ? '' : `<h2>${esc(advice.headline)}</h2>`}
+    ${warnings}
+    ${reasons}
+    ${prose}
+  </section>`;
+}
 
 export function renderBuildBook(plan: BookPlan): string {
   /*
@@ -118,6 +199,13 @@ export function renderBuildBook(plan: BookPlan): string {
     tr { break-inside: avoid; }
     thead { display: table-header-group; }
   }
+  .advice { margin: 0 0 6mm; }
+  .advice h2 { font-size: 12pt; margin: 0 0 2mm; }
+  .advice .reasons { margin: 0 0 3mm; padding-left: 5mm; font-size: 10pt; }
+  .advice .prose p { margin: 0 0 2mm; font-size: 10pt; }
+  /* Its own box, above the build order -- see renderAdvice for why. */
+  .warn { border-left: 2.5pt solid #b4501e; background: #fbf4ef; padding: 2.5mm 4mm; margin: 0 0 3mm; }
+  .warn ul { margin: 1.5mm 0 0; padding-left: 5mm; font-size: 10pt; }
 </style>
 </head>
 <body>
@@ -125,7 +213,7 @@ export function renderBuildBook(plan: BookPlan): string {
 <p class="sub">
   Build book for ${esc(plan.architect)} &middot; generated ${esc(plan.generatedAt.toISOString().slice(0, 10))}
 </p>
-
+${renderAdvice(plan.advice)}
 <table>
   <thead>
     <tr><th class="n">#</th><th>Structure</th><th>Build id</th><th>Body</th><th class="n">Tier</th><th class="n">Tonnes</th></tr>
