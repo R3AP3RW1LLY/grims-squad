@@ -319,7 +319,21 @@ export class AssistantService {
   ): Promise<Fact[]> {
     const plan = planFor(question, await this.#commodityNames(), await this.#shipNames());
 
-    const legs: Array<Promise<Fact[]>> = [this.knowledge.semantic(question)];
+    /*
+     * ★ TWO VECTOR LEGS, NOT ONE — SQUADRON OWNER, 2026-08-22 ★
+     *
+     * Prose and places are searched separately and can never crowd each other out. They were one
+     * search until an audit found "how do I become a member of the squadron" answering with five
+     * star system names: 302 prose rows cannot win an approximate search against 687,000 places.
+     *
+     * The place leg runs on every question rather than behind a keyword guess — members phrase
+     * things their own way and keyword rules break on the phrasing nobody predicted. Its similarity
+     * floor is what keeps it quiet on questions that are not about places; see semanticPlaces.
+     */
+    const legs: Array<Promise<Fact[]>> = [
+      this.knowledge.semantic(question),
+      this.knowledge.semanticPlaces(question),
+    ];
 
     if (plan.fit !== null) legs.push(this.#fitLeg(plan.fit));
 

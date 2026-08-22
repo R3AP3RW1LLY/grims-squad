@@ -113,3 +113,95 @@ describe('places and prose are searched separately', () => {
     ).not.toMatch(/kind\s*<>\s*ALL\(\$/);
   });
 });
+
+/**
+ * The other half: places ARE searchable, just never through the prose door.
+ *
+ * ★ THE POINT OF SPLITTING RATHER THAN DELETING ★
+ *
+ * An audit on 2026-08-22 found nothing in the codebase read place embeddings — 687,000 rows that
+ * only ever harmed retrieval. The owner chose to build the consumer rather than abandon the data,
+ * so "somewhere quiet with good mining and a large landing pad" is now answerable: measured on the
+ * live corpus it returns five Extraction-economy settlements at 0.712-0.724 similarity.
+ *
+ * A question no column can answer, which is exactly what vectors are for.
+ */
+describe('places are searchable on their own terms', () => {
+  it('★ MANDATORY: there is a place search, and it is separate ★', () => {
+    const src = read(KNOWLEDGE);
+
+    expect(src, 'the place search exists').toContain('semanticPlaces');
+    expect(
+      src,
+      'and selects places rather than excluding them — the mirror of the prose query',
+    ).toMatch(/kind IN \(\$\{PLACE_LIST\}\)/);
+  });
+
+  it('★ MANDATORY: places have a HIGHER similarity floor than prose ★', () => {
+    /*
+     * The floor is the only thing keeping the place leg quiet on questions that are not about
+     * places, because it runs on every question rather than behind a keyword guess.
+     *
+     * Measured: places score 0.59-0.61 against "how do I get more jump range" and "how do I become
+     * a member", and 0.712-0.724 against a real place question. At the ordinary prose floor of
+     * 0.55 a joining question would pull in star systems — the failure this file exists to prevent.
+     */
+    const src = read(KNOWLEDGE);
+
+    const prose = /const MIN_SIMILARITY = ([0-9.]+)/.exec(src)?.[1];
+    const place = /const PLACE_MIN_SIMILARITY = ([0-9.]+)/.exec(src)?.[1];
+
+    expect(prose, 'the prose floor is readable').toBeDefined();
+    expect(place, 'the place floor is readable').toBeDefined();
+    expect(
+      Number(place),
+      'a place floor at or below the prose floor lets places answer prose questions',
+    ).toBeGreaterThan(Number(prose));
+
+    // Above where places land on non-place questions (0.61), below where they land on real ones.
+    expect(Number(place)).toBeGreaterThanOrEqual(0.65);
+    expect(Number(place)).toBeLessThan(0.71);
+  });
+
+  it('★ MANDATORY: the assistant runs both legs ★', () => {
+    /*
+     * Adding the method and never calling it is the failure this project keeps hitting — a feature
+     * complete everywhere except where somebody could reach it. Twice already this session.
+     */
+    const assistant = read('apps/api/src/ai/assistant.service.ts');
+
+    expect(assistant.length, 'assistant.service.ts is readable').toBeGreaterThan(1_000);
+
+    /*
+     * Anchored to the START of a line so a COMMENTED-OUT call cannot pass. Written with toContain
+     * first, and commenting the leg out left the string sitting in the comment and the test green —
+     * which is the very failure this test exists to catch, rebuilt inside the catcher.
+     */
+    expect(assistant, 'the prose leg runs').toMatch(/^\s*this\.knowledge\.semantic\(question\)/m);
+    expect(assistant, 'and so does the place leg').toMatch(
+      /^\s*this\.knowledge\.semanticPlaces\(question\)/m,
+    );
+  });
+
+  it('the place index migration matches the query predicate', () => {
+    const migration = read(
+      'packages/db/prisma/migrations/20260822230000_place_vector_index/migration.sql',
+    );
+
+    expect(migration.length).toBeGreaterThan(200);
+    expect(migration, 'selects the place kinds').toMatch(/kind IN \(/i);
+    for (const kind of PLACE_KINDS) {
+      expect(migration, `the place index covers ${kind}`).toContain(`'${kind}'`);
+    }
+    /*
+     * The same two rules its sibling learned the hard way. Matched on the STATEMENT, not the word:
+     * the migration explains at length why it does not use a concurrent build, and a test that
+     * forbade the word would forbid the explanation.
+     */
+    expect(
+      migration,
+      'a concurrent build cannot run inside a migration transaction',
+    ).not.toMatch(/CREATE\s+INDEX\s+CONCURRENTLY/i);
+    expect(migration, 'the build memory is capped').toContain('maintenance_work_mem');
+  });
+});
