@@ -1,4 +1,5 @@
 import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
+import { SystemSummary } from './system-summary.js';
 import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
 import { useEffect, useState } from 'preact/hooks';
@@ -661,6 +662,11 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
 
       {tab !== 'system' ? null : (
         <Section title="The system">
+          {/*
+            The summary before the tree, same order as the website: a member opening a plan wants to
+            know what the system IS before reading which body has what on it.
+          */}
+          <SystemSummary plan={plan} buildTypes={buildTypes} />
           <SystemTree
             plan={plan}
             buildTypes={buildTypes}
