@@ -1,4 +1,5 @@
 import type { ColonyPlan, CommodityPrice, SystemTradeLine } from '../../../../../lib/api';
+import { siteBuildLabel } from '@grims/shared/colony-build-label';
 
 /**
  * What the system BECOMES, and what its markets would then trade.
@@ -274,7 +275,7 @@ function PerStation({ plan }: { plan: ColonyPlan }) {
     if (site === undefined) return 'a planned site';
     const body = plan.bodies.find((b) => b.bodyId === site.bodyId);
     const where = body === undefined ? '' : ` · ${body.name.replace(plan.systemName, '').trim()}`;
-    return `${site.buildTypeName ?? 'nothing chosen'}${where}`;
+    return `${siteBuildLabel(site.buildTypeName, site.buildTypeId, 'nothing chosen')}${where}`;
   };
 
   return (

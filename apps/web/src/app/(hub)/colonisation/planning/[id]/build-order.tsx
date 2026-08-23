@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { siteBuildLabel } from '@grims/shared/colony-build-label';
 import { useState } from 'react';
 import type { ColonyPlan, PlanProblem, PlanSimStep } from '../../../../../lib/api';
 import { apiPatch } from '../../../../../lib/api-client';
@@ -177,7 +178,7 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
                     {String(i + 1).padStart(2, '0')}
                   </span>{' '}
                   <span className="text-[var(--color-text-primary)]">
-                    {s.buildTypeName ?? 'nothing chosen yet'}
+                    {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
                   </span>
                   <span className="ml-2 text-[11px] text-[var(--color-text-secondary)]">
                     {shortName} · {s.location}

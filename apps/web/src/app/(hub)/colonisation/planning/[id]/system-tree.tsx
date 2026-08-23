@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
 /*
  * The SUBPATH, not the barrel: this is a client component and the barrel reaches node:crypto,
  * which fails the browser build and 500s every hub page. `client-imports.spec.ts` guards it.
@@ -364,7 +365,7 @@ export function SystemTree({
                                 <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
                                   #{s.position + 1}
                                 </span>{' '}
-                                {s.buildTypeName ?? 'nothing chosen yet'}
+                                {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
                                 {s.isPrimary ? (
                                   <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)]">
                                     primary
@@ -715,7 +716,7 @@ function AddSite({
 
           return (
             <option key={b.id} value={b.id}>
-              {b.displayName} · T{b.tier}
+              {buildTypeLabel(b.displayName, b.id)} · T{b.tier}
               {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
               {b.needsPoints > 0
                 ? ` · needs ${b.needsPoints} T${b.needsTier}${short ? ` — only ${have} banked` : ''}`
