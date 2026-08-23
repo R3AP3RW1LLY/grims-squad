@@ -206,3 +206,90 @@ describe('the system summary is on both surfaces', () => {
     }
   });
 });
+
+/**
+ * Pinning a site, and the tier cost that never reached the app.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "Pin a site to see details about it. This will update in real time as you make changes."
+ *
+ * ★ AND A PARITY GAP THAT WAS REPORTED AS CLOSED ★
+ *
+ * 0.10.1 shipped the picker warnings as "refuses impossible surface builds AND shows tier cost
+ * against what is banked". Only the refusal reached the companion: the hub had always sent
+ * needsTier and needsPoints, hub-colony.ts never named them, and the app dropped them on the floor.
+ * Found while building the pinned panel, which needed the same two numbers.
+ *
+ * That is the third time a field the hub sends has been silently discarded because the app's type
+ * did not declare it — after trade/selfSufficiency/prices, and after orphanFlags.
+ */
+describe('pinning a site works on both surfaces', () => {
+  const PINNED = [
+    ['website', 'apps/web/src/app/(hub)/colonisation/planning/[id]/pinned-site.tsx'],
+    ['companion', 'apps/companion/src/renderer/pinned-site.tsx'],
+  ] as const;
+
+  it('★ MANDATORY: both panels exist and use the shared rule ★', () => {
+    for (const [what, rel] of PINNED) {
+      const src = read(rel);
+      expect(src.length, `${what} pinned panel is readable`).toBeGreaterThan(800);
+      expect(src, `${what} uses the shared siteDetail`).toContain('siteDetail');
+    }
+  });
+
+  it('★ MANDATORY: both trees actually RENDER the panel ★', () => {
+    // A panel nobody renders is the failure this project keeps having. Anchored to line-start so a
+    // commented-out call cannot pass.
+    expect(
+      read('apps/web/src/app/(hub)/colonisation/planning/[id]/system-tree.tsx'),
+      'the website renders the pinned panel',
+    ).toMatch(/^\s*<PinnedSite/m);
+    expect(
+      read('apps/companion/src/renderer/planning.tsx'),
+      'the app renders the pinned panel',
+    ).toMatch(/^\s*<PinnedSite/m);
+  });
+
+  it('★ MANDATORY: both pin by ID, never by holding the site object ★', () => {
+    /*
+     * Holding the object freezes it at the moment it was pinned, so the panel goes on describing a
+     * build that has since changed — the opposite of what pinning is for.
+     */
+    for (const [what, rel] of [
+      ['website', 'apps/web/src/app/(hub)/colonisation/planning/[id]/system-tree.tsx'],
+      ['companion', 'apps/companion/src/renderer/planning.tsx'],
+    ] as const) {
+      const src = read(rel);
+      expect(src, `${what} stores the id`).toMatch(/setPinnedId/);
+      expect(src, `${what} looks the site up fresh`).toMatch(/plan\.sites\.find/);
+    }
+  });
+
+  it('★ MANDATORY: the companion declares the tier-cost fields the hub sends ★', () => {
+    /*
+     * The gap this work uncovered. A field the hub sends and the app does not declare is a field the
+     * app throws away, silently — and the picker then shows no cost while the website shows one.
+     */
+    const hub = read('apps/companion/src/hub-colony.ts');
+
+    /*
+     * Anchored to line-start so a COMMENTED-OUT declaration cannot pass. Written with a plain match
+     * first and the mutation survived: `// readonly needsTier: number;` still contains the text.
+     * That is the fourth time in this session a source-text assertion has matched a comment.
+     */
+    expect(hub, 'needsTier must be declared').toMatch(/^\s*readonly needsTier: number;/m);
+    expect(hub, 'needsPoints must be declared').toMatch(/^\s*readonly needsPoints: number;/m);
+  });
+
+  it('★ MANDATORY: both pickers show what a build spends ★', () => {
+    for (const [what, rel] of [
+      ['website', 'apps/web/src/app/(hub)/colonisation/planning/[id]/system-tree.tsx'],
+      ['companion', 'apps/companion/src/renderer/planning.tsx'],
+    ] as const) {
+      const src = read(rel);
+      expect(src, `${what} picker shows the tier cost`).toMatch(/needs \$\{b\.needsPoints\}/);
+      expect(src, `${what} picker warns when it is not banked`).toContain('only ${have} banked');
+    }
+  });
+});

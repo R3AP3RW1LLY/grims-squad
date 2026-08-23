@@ -1,4 +1,5 @@
 import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
+import { PinnedSite } from './pinned-site.js';
 import { SystemSummary } from './system-summary.js';
 import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
@@ -821,6 +822,28 @@ function SystemTree({
   canEdit: boolean;
   act: (fn: () => Promise<Answer<unknown>>) => void;
 }): JSX.Element {
+  /*
+   * ★ PINNED BY ID, NOT BY OBJECT ★
+   *
+   * Holding the site object would freeze it at the moment it was pinned and the panel would go on
+   * describing a build that had since changed — the opposite of what pinning is for. Looked up
+   * fresh each render, so reordering moves what is banked by the time this site is reached and the
+   * panel follows.
+   *
+   * Declared before the empty-bodies guard: a hook after an early return is a hook that sometimes
+   * does not run, which React forbids.
+   */
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const pinned = pinnedId === null ? undefined : plan.sites.find((s) => s.id === pinnedId);
+
+  /*
+   * What the whole order banks, for the picker. Mirrors the website exactly — the picker offers
+   * builds for a body not yet in the order, so the end state is the honest figure to judge against;
+   * the PINNED panel uses the per-step figure instead, because a placed site has a position.
+   */
+  const last = plan.simulation.steps[plan.simulation.steps.length - 1];
+  const banked = { tier2: last?.tier2 ?? 0, tier3: last?.tier3 ?? 0 };
+
   if (plan.bodies.length === 0) {
     return (
       <Empty>
@@ -847,6 +870,19 @@ function SystemTree({
 
   return (
     <div>
+      {/*
+        The pinned site sits ABOVE the tree, where the eye already is after tapping a row. Below it,
+        a member would tap and have the answer appear off-screen.
+      */}
+      {pinned === undefined ? null : (
+        <PinnedSite
+          site={pinned}
+          plan={plan}
+          buildTypes={buildTypes}
+          onClose={() => setPinnedId(null)}
+        />
+      )}
+
       {/*
         ★ WHAT THE MODEL CANNOT SEE ★
 
@@ -960,7 +996,15 @@ function SystemTree({
                           <span style={{ ...MONO, fontSize: '10px', color: C.faint }}>
                             #{s.position + 1}
                           </span>{' '}
-                          {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
+                          <button
+                            type="button"
+                            onClick={() => setPinnedId(pinnedId === s.id ? null : s.id)}
+                            class="linkish"
+                            style={{ textAlign: 'left', color: pinnedId === s.id ? C.orange : C.dim }}
+                            aria-pressed={pinnedId === s.id}
+                          >
+                            {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
+                          </button>
                           {s.isPrimary ? (
                             <span
                               style={{
@@ -1098,6 +1142,7 @@ function SystemTree({
                     <AddSite
                       buildTypes={buildTypes}
                       where={where}
+                      banked={banked}
                       busy={busy}
                       onAdd={(buildTypeId) =>
                         act(() =>
@@ -1250,11 +1295,14 @@ function Slots({
 function AddSite({
   buildTypes,
   where,
+  banked,
   busy,
   onAdd,
 }: {
   buildTypes: readonly BuildTypeRow[];
   where: 'orbital' | 'surface';
+  /** What the order has banked by the time this body is reached. */
+  banked: { tier2: number; tier3: number };
   busy: boolean;
   onAdd: (buildTypeId: string) => void;
 }): JSX.Element {
@@ -1322,12 +1370,29 @@ function AddSite({
         style={{ ...inputStyle, width: 'auto', maxWidth: '260px', padding: '5px 8px' }}
       >
         <option value="">add a build…</option>
-        {usable.map((b) => (
-          <option key={b.id} value={b.id}>
-            {buildTypeLabel(b.displayName, b.id)} · T{b.tier}
-            {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
-          </option>
-        ))}
+        {usable.map((b) => {
+          /*
+           * ★ THE HALF OF THE PICKER WARNINGS THAT NEVER REACHED THE APP ★
+           *
+           * 0.10.1 shipped as "refuses impossible surface builds AND shows tier cost against what
+           * is banked". Only the refusal arrived here: the hub has always sent needsTier and
+           * needsPoints, and hub-colony.ts never named them, so the app dropped them on the floor.
+           *
+           * needsTier is 2 or 3; a build that needs nothing is always affordable.
+           */
+          const have = b.needsTier >= 3 ? banked.tier3 : banked.tier2;
+          const short = b.needsPoints > 0 && have < b.needsPoints;
+
+          return (
+            <option key={b.id} value={b.id}>
+              {buildTypeLabel(b.displayName, b.id)} · T{b.tier}
+              {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
+              {b.needsPoints > 0
+                ? ` · needs ${b.needsPoints} T${b.needsTier}${short ? ` — only ${have} banked` : ''}`
+                : ''}
+            </option>
+          );
+        })}
       </select>
       <Button
         tone="primary"

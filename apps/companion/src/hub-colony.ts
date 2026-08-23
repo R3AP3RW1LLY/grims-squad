@@ -998,6 +998,21 @@ export interface BuildTypeRow {
   readonly source: 'community' | 'observed';
   readonly confirmations: number;
   /** What finishing one does to the system. Community-measured, like everything here. */
+  /**
+   * What this build SPENDS in tier points, and from which pool.
+   *
+   * ★ A PARITY GAP THAT WAS REPORTED AS CLOSED — 2026-08-23 ★
+   *
+   * The picker warnings shipped in 0.10.1 as "refuses impossible surface builds AND shows tier cost
+   * against what is banked". Only the first half reached the app: the API has always sent these two
+   * numbers and this interface never named them, so the companion silently dropped them and its
+   * picker showed no cost at all.
+   *
+   * Exactly the failure the `trade`/`selfSufficiency`/`prices` comment above records, for the same
+   * reason: a field the hub sends and the app does not declare is a field the app throws away.
+   */
+  readonly needsTier: number;
+  readonly needsPoints: number;
   readonly effects: BuildTypeEffects;
   /** What it feeds the port that receives it. `none` for the many that feed nothing. */
   readonly economyInfluence: string;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { PinnedSite } from './pinned-site';
 import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
 /*
@@ -228,6 +229,19 @@ export function SystemTree({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * ★ PINNED BY ID, NOT BY OBJECT — SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "Pin a site to see details about it. This will update in real time as you make changes."
+   *
+   * Holding the site object would freeze it at the moment it was pinned, and the panel would go on
+   * describing a build that had since been changed — the opposite of what pinning is for. The id is
+   * looked up fresh on every render, so reordering the build order moves what is banked by the time
+   * this site is reached and the panel follows.
+   */
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const pinned = pinnedId === null ? undefined : plan.sites.find((s) => s.id === pinnedId);
+
   const base = `/v1/logistics/colony/plans/${encodeURIComponent(plan.id)}`;
 
   /*
@@ -295,6 +309,19 @@ export function SystemTree({
         <p className="m-0 mb-4 rounded border border-[var(--color-semantic-warning)] bg-[color-mix(in_srgb,var(--color-semantic-warning)_7%,transparent)] px-3 py-2 text-sm text-[var(--color-semantic-warning)]">
           {error}
         </p>
+      )}
+
+      {/*
+        The pinned site sits ABOVE the tree, where the eye already is after clicking. Below it, a
+        member would click a row and have the answer appear off-screen.
+      */}
+      {pinned === undefined ? null : (
+        <PinnedSite
+          site={pinned}
+          plan={plan}
+          buildTypes={buildTypes}
+          onClose={() => setPinnedId(null)}
+        />
       )}
 
       {/*
@@ -394,7 +421,18 @@ export function SystemTree({
                                 <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
                                   #{s.position + 1}
                                 </span>{' '}
-                                {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
+                                <button
+                                  type="button"
+                                  onClick={() => setPinnedId(pinnedId === s.id ? null : s.id)}
+                                  className={`linkish text-left ${
+                                    pinnedId === s.id
+                                      ? 'text-[var(--color-brand-orange)]'
+                                      : 'text-[var(--color-text-secondary)]'
+                                  }`}
+                                  aria-pressed={pinnedId === s.id}
+                                >
+                                  {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
+                                </button>
                                 {s.isPrimary ? (
                                   <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)]">
                                     primary
