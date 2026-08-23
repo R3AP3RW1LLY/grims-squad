@@ -1,4 +1,5 @@
 import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
+import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
 import { useEffect, useState } from 'preact/hooks';
 import { compareBodyNames } from '@grims/shared/body-order';
 import type { JSX } from 'preact';
@@ -929,7 +930,7 @@ function SystemTree({
                           <span style={{ ...MONO, fontSize: '10px', color: C.faint }}>
                             #{s.position + 1}
                           </span>{' '}
-                          {s.buildTypeName ?? 'nothing chosen yet'}
+                          {siteBuildLabel(s.buildTypeName, s.buildTypeId)}
                           {s.isPrimary ? (
                             <span
                               style={{
@@ -1293,7 +1294,7 @@ function AddSite({
         <option value="">add a build…</option>
         {usable.map((b) => (
           <option key={b.id} value={b.id}>
-            {b.displayName} · T{b.tier}
+            {buildTypeLabel(b.displayName, b.id)} · T{b.tier}
             {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
           </option>
         ))}
@@ -2128,7 +2129,7 @@ function BuildOrder({
               <span style={{ ...MONO, fontSize: '11px', color: C.faint }}>
                 {String(i + 1).padStart(2, '0')}
               </span>{' '}
-              <span style={{ color: C.text }}>{s.buildTypeName ?? 'nothing chosen yet'}</span>
+              <span style={{ color: C.text }}>{siteBuildLabel(s.buildTypeName, s.buildTypeId)}</span>
               <span style={{ marginLeft: '8px', fontSize: '11px', color: C.dim }}>
                 {body === undefined ? 'not placed' : shortName(body.name, plan.systemName)} ·{' '}
                 {s.location}
@@ -2490,7 +2491,7 @@ function PerStation({ plan }: { plan: ColonyPlan }): JSX.Element | null {
     if (site === undefined) return 'a planned site';
     const body = plan.bodies.find((b) => b.bodyId === site.bodyId);
     const where = body === undefined ? '' : ` · ${body.name.replace(plan.systemName, '').trim()}`;
-    return `${site.buildTypeName ?? 'nothing chosen'}${where}`;
+    return `${siteBuildLabel(site.buildTypeName, site.buildTypeId, 'nothing chosen')}${where}`;
   };
 
   return (
