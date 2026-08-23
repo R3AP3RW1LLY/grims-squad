@@ -1,4 +1,5 @@
 import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
+import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
 import { useEffect, useState } from 'preact/hooks';
 import { compareBodyNames } from '@grims/shared/body-order';
@@ -913,6 +914,29 @@ function SystemTree({
                     {where}
                     {cap === null ? '' : ` · ${list.length} of ${cap}`}
                   </p>
+
+                  {/*
+                    ★ OVER THE RECORDED COUNT — SQUADRON OWNER, 2026-08-23 ★
+
+                    Mirrors the website exactly, wording included: the sentence lives in
+                    @grims/shared so the two surfaces cannot disagree about what a member is told.
+
+                    WARNS, never refuses. A slot count is somebody's reading off the in-game
+                    architect view, so a stale or mistyped number must not stop a build the game
+                    would allow.
+                  */}
+                  {cap === null
+                    ? null
+                    : slotWarnings({
+                        orbitalSlots: where === 'orbital' ? cap : null,
+                        surfaceSlots: where === 'surface' ? cap : null,
+                        orbitalPlanned: where === 'orbital' ? list.length : 0,
+                        surfacePlanned: where === 'surface' ? list.length : 0,
+                      }).map((w) => (
+                        <p key={w.where} style={{ margin: '3px 0 0', fontSize: '11px', color: C.warn }}>
+                          {w.message}
+                        </p>
+                      ))}
 
                   {list.map((s) => (
                     <div key={s.id} style={{ marginTop: '3px' }}>

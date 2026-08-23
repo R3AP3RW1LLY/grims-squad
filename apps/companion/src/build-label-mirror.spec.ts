@@ -81,3 +81,66 @@ describe('the build_type_id is shown on both surfaces', () => {
     );
   });
 });
+
+/**
+ * A body asked for more builds than it has room for must say so on BOTH surfaces.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "should the planner stop you building more structures on a body than it has slots for" — warn,
+ * but let it through.
+ *
+ * Both surfaces already printed "2 of 3" and said nothing at all when it became "4 of 3". A member
+ * reading a count they have exceeded has no reason to look twice at it.
+ *
+ * The wording is not duplicated — both call `slotWarnings` in @grims/shared — so what this guards
+ * is that each surface still asks.
+ */
+describe('an overcommitted body is flagged on both surfaces', () => {
+  const PLANNERS = [
+    ['website', 'apps/web/src/app/(hub)/colonisation/planning/[id]/system-tree.tsx'],
+    ['companion', 'apps/companion/src/renderer/planning.tsx'],
+  ] as const;
+
+  it('★ MANDATORY: both planners check the recorded slot count ★', () => {
+    for (const [what, rel] of PLANNERS) {
+      const src = read(rel);
+
+      expect(src.length, `${what} planner is readable`).toBeGreaterThan(1_000);
+      expect(src, `${what} must warn when a body is overcommitted`).toContain('slotWarnings');
+    }
+  });
+
+  it('★ MANDATORY: neither warns on an UNRECORDED body ★', () => {
+    /*
+     * Null slots mean nobody has looked, not "no room". Warning on those would put a message on
+     * every unsurveyed body — 120 of the 184 held — and a planner that always warns is one nobody
+     * reads. Both surfaces must guard on `cap === null` before asking.
+     */
+    for (const [what, rel] of PLANNERS) {
+      /*
+       * Asserts the null guard sits immediately BEFORE the call, which is the actual requirement —
+       * an earlier version matched on the ternary's shape and was defeated by indentation, which
+       * tested formatting rather than behaviour.
+       *
+       * `[\s\S]` rather than `\s` with a real newline in it: a line break cannot sit inside a
+       * regex literal, and writing it that way broke the file outright.
+       */
+      expect(read(rel), `${what} skips bodies with no recorded slots`).toMatch(
+        /cap === null[\s\S]{0,80}slotWarnings/,
+      );
+    }
+  });
+
+  it('the warning wording lives in one place', () => {
+    const shared = read('packages/shared/src/colony-slots.ts');
+    expect(shared).toContain('export function slotWarnings');
+
+    for (const [what, rel] of PLANNERS) {
+      expect(
+        read(rel),
+        `${what} must not hand-write the overcommit sentence`,
+      ).not.toMatch(/slots? recorded\. Check the architect/i);
+    }
+  });
+});

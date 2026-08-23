@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
 /*
  * The SUBPATH, not the barrel: this is a client component and the barrel reaches node:crypto,
@@ -355,6 +356,34 @@ export function SystemTree({
                       {where}
                       {cap === null ? '' : ` · ${list.length} of ${cap}`}
                     </p>
+
+                    {/*
+                      ★ OVER THE RECORDED COUNT — SQUADRON OWNER, 2026-08-23 ★
+
+                      "2 of 3" was already shown, and said nothing at all when it became "4 of 3".
+                      A member reading a count they have exceeded has no reason to look twice at it.
+
+                      WARNS, never refuses. A slot count is a member's observation off the in-game
+                      architect view — possibly stale, possibly mistyped, possibly absent. The
+                      non-landable rule above CAN refuse because the galaxy dump is authoritative
+                      about landability; nothing here is, so a wrong number must never stop somebody
+                      planning a build the game would actually allow.
+                    */}
+                    {cap === null
+                      ? null
+                      : slotWarnings({
+                          orbitalSlots: where === 'orbital' ? cap : null,
+                          surfaceSlots: where === 'surface' ? cap : null,
+                          orbitalPlanned: where === 'orbital' ? list.length : 0,
+                          surfacePlanned: where === 'surface' ? list.length : 0,
+                        }).map((w) => (
+                          <p
+                            key={w.where}
+                            className="m-0 mt-1 text-[11px] text-[var(--color-semantic-warning)]"
+                          >
+                            {w.message}
+                          </p>
+                        ))}
 
                     {list.length === 0 ? null : (
                       <ul className="m-0 mt-1 list-none space-y-0.5 p-0">
