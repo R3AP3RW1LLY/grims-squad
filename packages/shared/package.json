@@ -119,6 +119,10 @@
       "types": "./dist/colony-scout.d.ts",
       "default": "./dist/colony-scout.js"
     },
+    "./colony-site-detail": {
+      "types": "./dist/colony-site-detail.d.ts",
+      "default": "./dist/colony-site-detail.js"
+    },
     "./colony-system-summary": {
       "types": "./dist/colony-system-summary.d.ts",
       "default": "./dist/colony-system-summary.js"
