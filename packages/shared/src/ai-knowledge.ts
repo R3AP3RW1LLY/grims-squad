@@ -463,3 +463,26 @@ export type PlaceKind = (typeof PLACE_KINDS)[number];
 export function isPlaceKind(kind: string): boolean {
   return (PLACE_KINDS as readonly string[]).includes(kind);
 }
+
+/**
+ * The vector indexes retrieval actually plans against.
+ *
+ * ★ FOUND 2026-08-23: THE REBUILD WAS AIMED AT THE WRONG INDEX ★
+ *
+ * `embedKnowledge` rebuilt `knowledge_items_embedding_idx` after every sweep — the single shared
+ * index that the prose/place split replaced. So it spent a long CONCURRENT rebuild on an index no
+ * query plans against, and never rebuilt the two that every query now uses.
+ *
+ * Left alone the place index would have degraded exactly as the shared one did: retrieval still
+ * returning rows, and them simply being the wrong ones.
+ *
+ * ★ NAMED HERE SO THE JOB AND THE MIGRATIONS CANNOT DRIFT ★
+ *
+ * These strings exist in three places — the migrations that create them, the queries whose
+ * predicates must match, and the job that rebuilds them. A hardcoded name in the job is exactly how
+ * this went wrong once already.
+ */
+export const VECTOR_INDEXES = [
+  'knowledge_items_embedding_prose_idx',
+  'knowledge_items_embedding_place_idx',
+] as const;

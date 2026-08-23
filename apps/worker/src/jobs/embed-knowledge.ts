@@ -4,6 +4,7 @@ import {
   EMBED_MODEL,
   EMBED_CONCURRENCY,
   EMBEDDED_SOURCES,
+  VECTOR_INDEXES,
   type KnowledgeSource,
 } from '@grims/shared';
 
@@ -228,38 +229,58 @@ export async function embedKnowledge(
      * the alternative — on a pooled client it would leak the value onto whichever connection served
      * it, for every later caller.
      */
-    const reindexed = await db
-      .$executeRawUnsafe(`REINDEX INDEX CONCURRENTLY knowledge_items_embedding_idx`)
-      .then(() => true)
-      .catch(async (concurrentError: unknown) => {
-        /*
-         * CONCURRENTLY cannot run inside a transaction and needs the index to be valid. A plain
-         * rebuild is the fallback: it takes an ACCESS EXCLUSIVE lock on the index, which blocks
-         * planning for every SELECT on knowledge_items, so it is bounded and it is reported.
-         */
-        return db
-          .$transaction(async (tx) => {
-            await tx.$executeRawUnsafe(`SET LOCAL maintenance_work_mem = '256MB'`);
-            await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '30s'`);
-            await tx.$executeRawUnsafe(`REINDEX INDEX knowledge_items_embedding_idx`);
-            return true;
-          })
-          .catch((plainError: unknown) => {
+    /*
+     * ★ THE INDEXES RETRIEVAL USES — NOT THE ONE IT USED TO — 2026-08-23 ★
+     *
+     * This rebuilt `knowledge_items_embedding_idx` by name: the single shared index that the
+     * prose/place split replaced. So every sweep spent a long CONCURRENT rebuild on an index no
+     * query plans against, and never rebuilt the two that every query now does.
+     *
+     * The prose index would not have suffered — 302 rows barely have a graph to degrade. The PLACE
+     * index absolutely would, as the nightly EDDN sweep works through a million rows, and the
+     * symptom would be the one this whole reindex exists to prevent: retrieval still returning
+     * rows, and them simply being the wrong ones.
+     *
+     * Names come from VECTOR_INDEXES rather than being typed here, because a hardcoded name is
+     * precisely how this went wrong the first time.
+     */
+    const results = await Promise.all(
+      VECTOR_INDEXES.map(async (index) =>
+        db
+          .$executeRawUnsafe(`REINDEX INDEX CONCURRENTLY ${index}`)
+          .then(() => true)
+          .catch(async (concurrentError: unknown) => {
             /*
-             * Reported, not swallowed. A silent failure here degrades every answer the assistant
-             * gives and changes nothing a person can see — which is exactly how it survived
-             * unnoticed from the day it was written.
+             * CONCURRENTLY cannot run inside a transaction and needs the index to be valid. A plain
+             * rebuild is the fallback: it takes an ACCESS EXCLUSIVE lock on the index, which blocks
+             * planning for every SELECT on knowledge_items, so it is bounded and it is reported.
              */
-            console.error(
-              `embed: the vector index was NOT rebuilt — retrieval will keep returning the ` +
-                `wrong rows until it is. concurrent: ${String(concurrentError)}; plain: ` +
-                String(plainError),
-            );
-            return false;
-          });
-      });
+            return db
+              .$transaction(async (tx) => {
+                await tx.$executeRawUnsafe(`SET LOCAL maintenance_work_mem = '256MB'`);
+                await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '30s'`);
+                await tx.$executeRawUnsafe(`REINDEX INDEX ${index}`);
+                return true;
+              })
+              .catch((plainError: unknown) => {
+                /*
+                 * Reported, not swallowed. A silent failure here degrades every answer the assistant
+                 * gives and changes nothing a person can see — which is exactly how it survived
+                 * unnoticed from the day it was written.
+                 */
+                console.error(
+                  `embed: ${index} was NOT rebuilt — retrieval will keep returning the ` +
+                    `wrong rows until it is. concurrent: ${String(concurrentError)}; plain: ` +
+                    String(plainError),
+                );
+                return false;
+              });
+          }),
+      ),
+    );
 
-    if (reindexed) console.log('embed: vector index rebuilt');
+    const reindexed = results.every((ok) => ok);
+    if (reindexed) console.log(`embed: vector indexes rebuilt (${VECTOR_INDEXES.join(', ')})`);
   }
 
   return { pending, embedded, failed };
