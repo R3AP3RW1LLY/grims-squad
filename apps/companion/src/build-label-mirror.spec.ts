@@ -144,3 +144,65 @@ describe('an overcommitted body is flagged on both surfaces', () => {
     }
   });
 });
+
+/**
+ * The system summary panel must exist on BOTH surfaces and agree on every figure.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "we would like our planning and scouting and all colonization pages to look like this ... remember
+ * we need all of this in full parity on the website and the companion app"
+ *
+ * The seven effects came down per build type since the catalogue shipped and nothing added them up.
+ * Every number, label and rule now lives in @grims/shared, so the two surfaces cannot disagree about
+ * what a system is worth — only the chrome differs.
+ */
+describe('the system summary is on both surfaces', () => {
+  const PANELS = [
+    ['website', 'apps/web/src/app/(hub)/colonisation/planning/[id]/system-summary.tsx'],
+    ['companion', 'apps/companion/src/renderer/system-summary.tsx'],
+  ] as const;
+
+  it('★ MANDATORY: both panels exist and use the shared summariser ★', () => {
+    for (const [what, rel] of PANELS) {
+      const src = read(rel);
+
+      expect(src.length, `${what} panel is readable`).toBeGreaterThan(800);
+      expect(src, `${what} must use the shared summariser`).toContain('summariseSystem');
+      expect(src, `${what} must use the shared labels`).toContain('EFFECT_LABELS');
+    }
+  });
+
+  it('★ MANDATORY: both are actually RENDERED, not merely written ★', () => {
+    /*
+     * A panel nobody renders is the failure this project keeps having — seven times this session.
+     * Anchored so a commented-out call cannot pass.
+     */
+    expect(
+      read('apps/web/src/app/(hub)/colonisation/planning/[id]/page.tsx'),
+      'the website renders the panel',
+    ).toMatch(/^\s*<SystemSummary/m);
+    expect(
+      read('apps/companion/src/renderer/planning.tsx'),
+      'the app renders the panel',
+    ).toMatch(/^\s*<SystemSummary/m);
+  });
+
+  it('★ MANDATORY: neither presents the score as Raven figures ★', () => {
+    /*
+     * Raven publishes a System Score and not its formula. A number that looked like theirs and
+     * disagreed would be worse than showing none, because a member would plan against it. Both
+     * panels must say the figure is this platform's own.
+     */
+    for (const [what, rel] of PANELS) {
+      expect(read(rel), `${what} labels the score as ours`).toMatch(/ours|our own figure/i);
+    }
+  });
+
+  it('both derive BUILT from the shared progress helper, not a local rule', () => {
+    // A second rule would eventually disagree with the build order about the same site.
+    for (const [what, rel] of PANELS) {
+      expect(read(rel), `${what} uses siteProgress`).toContain('siteProgress');
+    }
+  });
+});

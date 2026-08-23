@@ -9,6 +9,7 @@ import {
 import { NoAccess, AdminUnavailable } from '../../../app/no-access';
 import { getBuildTypes, getColonyPlan, getSystemAdvice } from '../../../../../lib/api';
 import { SystemAdvicePanel } from './system-advice';
+import { SystemSummary } from './system-summary';
 import { CopySystem } from '../../../../../components/copy-system';
 import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
 import { SystemTree } from './system-tree';
@@ -237,6 +238,14 @@ export default async function PlanPage({
 
         {tab !== 'system' ? null : (
           <Section title="The system">
+            {/*
+              ★ THE SUMMARY BEFORE THE TREE — SQUADRON OWNER, 2026-08-23 ★
+
+              A member opening a plan wants to know what the system IS before they start reading
+              which body has what on it. Same order as the reference layout, and the same reason the
+              build books lead with reasoning rather than the build list.
+            */}
+            <SystemSummary plan={plan} buildTypes={buildTypes} />
             <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
             {advice !== null && advice.state === 'ok' && (
               <SystemAdvicePanel advice={advice.data} canDraft={canEdit} />
