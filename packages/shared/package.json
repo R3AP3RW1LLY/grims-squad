@@ -174,6 +174,14 @@
     "./colony-draft-mode": {
       "types": "./dist/colony-draft-mode.d.ts",
       "default": "./dist/colony-draft-mode.js"
+    },
+    "./raven-import": {
+      "types": "./dist/raven-import.d.ts",
+      "default": "./dist/raven-import.js"
+    },
+    "./raven-preview": {
+      "types": "./dist/raven-preview.d.ts",
+      "default": "./dist/raven-preview.js"
     }
   },
   "scripts": {
