@@ -540,6 +540,11 @@ import type { SystemTrade, SelfSufficiency } from '@grims/shared/colony-economy-
  * grow a second implementation that disagrees with the website's list.
  */
 import type { MergedNeeds } from '@grims/shared/colony-all-needs';
+/*
+ * Only the SHAPE of the preview travels here. The reading and the diffing both happen on the hub,
+ * so the app and the website cannot be shown different consequences for the same file.
+ */
+import type { RavenPreview } from '@grims/shared/raven-preview';
 
 export interface PlanOrphanFlag {
   readonly kind: 'dangling-sites' | 'nothing-live' | 'stale';
@@ -1243,6 +1248,33 @@ export const addPlanSite = (
   },
 ): Promise<Answer<{ version: number }>> =>
   hubColony(call, `/plans/${encodeURIComponent(id)}/sites`, { method: 'POST', body });
+
+/**
+ * What importing a Raven Colonial export would change. Writes nothing.
+ *
+ * ★ SQUADRON OWNER, 2026-08-24: "Import wins, and say so." ★
+ *
+ * The file goes up as TEXT and the hub reads it, using the same `readRavenExport` the website's
+ * route uses. Parsing it here would be a second implementation of "what this file means", and the
+ * one that drifted would be the one deciding whether somebody's typed slot counts get overwritten.
+ */
+export const previewPlanImport = (
+  call: HubCall,
+  id: string,
+  file: string,
+): Promise<Answer<{ preview: RavenPreview; system: string }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}/import/preview`, {
+    method: 'POST',
+    body: { file },
+  });
+
+/** Applies it. Slot counts only — the hub decides that, not the app. */
+export const applyPlanImport = (
+  call: HubCall,
+  id: string,
+  file: string,
+): Promise<Answer<{ slotsWritten: number }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}/import`, { method: 'POST', body: { file } });
 
 export const removePlanSite = (
   call: HubCall,

@@ -356,6 +356,16 @@ contextBridge.exposeInMainWorld('colony', {
   /** Slot counts read off the game. Keyed on the system and body, not the plan. */
   planSlots: (systemId64: string, bodyId: number, body: unknown) =>
     ipcRenderer.invoke('colonyPlanSlots', systemId64, bodyId, body),
+  /**
+   * Importing a Raven Colonial export into a plan: preview, then apply.
+   *
+   * Two calls on purpose. Nothing is written until the member has seen what would change, because
+   * the worst outcome here is silently replacing a plan somebody spent an evening on.
+   */
+  planImportPreview: (id: string, file: string) =>
+    ipcRenderer.invoke('colonyPlanImportPreview', id, file),
+  planImportApply: (id: string, file: string) =>
+    ipcRenderer.invoke('colonyPlanImportApply', id, file),
   planAddSite: (id: string, body: unknown) => ipcRenderer.invoke('colonyPlanAddSite', id, body),
   planRemoveSite: (id: string, siteId: string, version: number) =>
     ipcRenderer.invoke('colonyPlanRemoveSite', id, siteId, version),

@@ -47,6 +47,7 @@ import {
 } from './ui.js';
 import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
 import type { MergedNeeds } from '@grims/shared/colony-all-needs';
+import type { RavenPreview } from '@grims/shared/raven-preview';
 import { needsFreshness, type FreshnessVerdict } from '@grims/shared/needs-freshness';
 import { groupByCategory } from '@grims/shared/commodity-category';
 import { rankOpportunities, type Opportunity } from '@grims/shared/colony-opportunity';
@@ -228,6 +229,18 @@ declare global {
         bodyId: number,
         body: { orbital: number | null; surface: number | null },
       ): Promise<Answer<{ ok: true }>>;
+      /**
+       * Importing a Raven Colonial export: preview, then apply.
+       *
+       * The file travels as TEXT and the hub reads it, so the app and the website cannot be shown
+       * different consequences for the same file. Two calls because nothing is written until the
+       * member has seen what would change.
+       */
+      planImportPreview(
+        id: string,
+        file: string,
+      ): Promise<Answer<{ preview: RavenPreview; system: string }>>;
+      planImportApply(id: string, file: string): Promise<Answer<{ slotsWritten: number }>>;
       planAddSite(
         id: string,
         body: {

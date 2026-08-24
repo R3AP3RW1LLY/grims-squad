@@ -9,6 +9,7 @@ import {
 import { NoAccess, AdminUnavailable } from '../../../app/no-access';
 import { getBuildTypes, getColonyPlan, getSystemAdvice } from '../../../../../lib/api';
 import { SystemAdvicePanel } from './system-advice';
+import { RavenImport } from './raven-import';
 import { SystemSummary } from './system-summary';
 import { CopySystem } from '../../../../../components/copy-system';
 import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
@@ -246,6 +247,15 @@ export default async function PlanPage({
               build books lead with reasoning rather than the build list.
             */}
             <SystemSummary plan={plan} buildTypes={buildTypes} />
+            {/*
+              ★ ABOVE THE TREE, BECAUSE IT FILLS THE TREE — 2026-08-24 ★
+
+              The tree is where slot counts are read and where their absence shows: a body with no
+              counts cannot be checked against, so the planner warns rather than enforcing. The
+              import is the fastest way to stop that being true, and of thirteen planned systems only
+              three have ever had counts typed in — so it belongs where somebody notices the gap.
+            */}
+            <RavenImport planId={plan.id} canEdit={canEdit} />
             <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
             {advice !== null && advice.state === 'ok' && (
               <SystemAdvicePanel advice={advice.data} canDraft={canEdit} planId={plan.id} />

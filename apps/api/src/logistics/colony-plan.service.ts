@@ -20,6 +20,9 @@ import {
   type BookAdvice,
 } from '@grims/shared';
 import { fetchSystemBodies, type EdsmSystemBodies } from '@grims/ed-clients';
+import { readRavenExport, type RavenImport } from '@grims/shared/raven-import';
+import { previewRavenImport, type RavenPreview } from '@grims/shared/raven-preview';
+import { siteProgress } from '@grims/shared/colony-plan-progress';
 import {
   selfSufficiency,
   systemTrade,
@@ -707,6 +710,130 @@ export class ColonyPlanService {
       // No assistant on this path: see the note above. The prose lives on the planning page.
       prose: '',
     };
+  }
+
+  /**
+   * What importing a Raven Colonial export into this plan would change. Writes NOTHING.
+   *
+   * ★ SQUADRON OWNER, 2026-08-24 ★
+   *
+   * "in raven colonial, we can export a json file with a users build plan, can we take this file ...
+   * and generate a new colonization plan" — with the ruling on conflicts being "Import wins, and say
+   * so."
+   *
+   * ★ TWO STEPS, AND THIS IS THE ONE THAT CANNOT HURT ★
+   *
+   * The worst outcome available to this feature is silently replacing a plan somebody spent an
+   * evening on, and every failure mode is quiet: the member picks a file off their disk, possibly
+   * the wrong one, and the plan simply becomes something else. So nothing is written until they have
+   * seen what would change, including what they would lose.
+   *
+   * The reading and the diffing both live in @grims/shared, so the website and the companion cannot
+   * be shown different consequences for the same file.
+   */
+  async previewImport(
+    planId: string,
+    callerId: string,
+    raw: unknown,
+  ): Promise<{ preview: RavenPreview; file: RavenImport } | null> {
+    const plan = await this.byId(planId, callerId);
+    if (plan === null) return null;
+
+    const file = readRavenExport(raw);
+    if (file === null) return null;
+
+    return {
+      file,
+      preview: previewRavenImport(file, {
+        bodies: plan.bodies.map((b) => ({
+          bodyId: b.bodyId,
+          name: b.name,
+          orbitalSlots: b.orbitalSlots,
+          surfaceSlots: b.surfaceSlots,
+          slotsAt: b.slotsAt,
+          slotsSource: b.slotsSource,
+        })),
+        sites: plan.sites.map((site) => ({
+          bodyId: site.bodyId,
+          buildTypeId: site.buildTypeId,
+          /*
+           * The same `siteProgress` the plan page draws its badges from, so "already built" means
+           * exactly what a member already sees it meaning — see the drafter, which works around the
+           * identical set of immovable structures.
+           */
+          state: siteProgress({
+            id: site.id,
+            totalTonnes: site.totalTonnes,
+            project: site.project,
+          }).state,
+        })),
+      }),
+    };
+  }
+
+  /**
+   * Applies an import: slot counts only.
+   *
+   * ★ SLOTS, AND DELIBERATELY NOT STRUCTURES — 2026-08-24 ★
+   *
+   * The slot counts are the thing no other source can supply. The journal does not carry them (101
+   * journals checked), so before this the only way in was a member reading the architect view and
+   * typing — which measurably does not scale: of thirteen planned systems, three had any slot data.
+   *
+   * Structures are different. The plan already has its own ordering, its own primary, and rows that
+   * have become real projects, and writing somebody else's export over that is the silent
+   * replacement this whole feature is shaped to avoid. The preview REPORTS what the file says about
+   * structures so a member can act on it themselves; applying them is a separate decision nobody has
+   * asked for yet.
+   *
+   * ★ MARKED AS IMPORTED ★
+   *
+   * `slots_source = 'import'` is the "say so" half of the ruling. Without it these are
+   * indistinguishable from typed counts, and the next import would warn the member that work they
+   * never did is about to be replaced.
+   */
+  async applyImport(
+    planId: string,
+    callerId: string,
+    mask: bigint,
+    raw: unknown,
+  ): Promise<{ slotsWritten: number } | null> {
+    if (!(await this.mayEdit(planId, callerId, mask))) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot edit this plan.');
+    }
+
+    const read = await this.previewImport(planId, callerId, raw);
+    if (read === null) return null;
+
+    const [plan] = await this.db.$queryRawUnsafe<Array<{ system_id64: string | null }>>(
+      `SELECT system_id64::text AS system_id64 FROM colony_plans WHERE id = $1::uuid`,
+      planId,
+    );
+    const systemId64 = plan?.system_id64 ?? null;
+    if (systemId64 === null) return { slotsWritten: 0 };
+
+    let slotsWritten = 0;
+    for (const change of [...read.preview.slotsAdded, ...read.preview.slotsChanged]) {
+      /*
+       * Scoped to bodies this system actually holds — `previewImport` has already dropped any the
+       * plan does not know, and reported them, because a slot record for an unknown body almost
+       * always means the wrong file was picked.
+       */
+      const changed = await this.db.$executeRawUnsafe(
+        `UPDATE colony_bodies
+            SET orbital_slots = $3, surface_slots = $4, slots_by_id = $5::uuid, slots_at = now(),
+                slots_source = 'import'
+          WHERE system_id64 = $1::bigint AND body_id = $2`,
+        systemId64,
+        change.bodyId,
+        change.to.orbital,
+        change.to.surface,
+        callerId,
+      );
+      slotsWritten += changed;
+    }
+
+    return { slotsWritten };
   }
 
   async byId(id: string, callerId: string): Promise<PlanDetail | null> {

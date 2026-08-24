@@ -1,5 +1,6 @@
 import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
 import { PinnedSite } from './pinned-site.js';
+import { RavenImport } from './raven-import.js';
 import { SystemSummary } from './system-summary.js';
 import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
@@ -694,6 +695,16 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
           {...(withSlots === 0 ? { tone: C.warn } : {})}
         />
       </div>
+
+      {/*
+        ★ RIGHT UNDER THE COUNT IT FIXES — 2026-08-24 ★
+
+        "Slots recorded" turns warning-coloured at zero, which is where a member notices the gap.
+        Filling it by hand is the only way in until now — and it measurably does not scale: of
+        thirteen planned systems, three ever had counts typed in. The import is the fastest answer
+        to the number immediately above it.
+      */}
+      <RavenImport planId={plan.id} canEdit={canEdit} onApplied={load} />
 
       {/*
         ★ WHERE THE BODIES CAME FROM, AND WHEN ★
