@@ -1401,6 +1401,62 @@ export class ColonyDeviceController {
     return { ok: true };
   }
 
+  /**
+   * The import, for the companion. Same service and same two steps as the website's door.
+   *
+   * Squadron owner's standing rule: "we need all of this in full parity on the website and the
+   * companion app." One service, two front doors — a second implementation would drift, and the
+   * half that drifted would be the one deciding whether somebody's typed slot counts get replaced.
+   */
+  @Public()
+  @Post('plans/:id/import/preview')
+  async previewImport(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { file?: unknown } = {},
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const read = await this.plans_.previewImport(id, me.userId, body.file);
+    if (read === null) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'That file could not be read as a Raven Colonial export.',
+      );
+    }
+
+    return { preview: read.preview, system: read.file.systemName };
+  }
+
+  @Public()
+  @Post('plans/:id/import')
+  async applyImport(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { file?: unknown } = {},
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_POST,
+      'You cannot edit colonisation plans.',
+    );
+
+    const mask = await this.permissions.effectiveMask(me.userId);
+    const done = await this.plans_.applyImport(id, me.userId, mask, body.file);
+    if (done === null) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'That file could not be read as a Raven Colonial export.',
+      );
+    }
+
+    return done;
+  }
+
   @Public()
   @Post('plans/:id/sites')
   async addPlanSite(

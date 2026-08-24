@@ -1095,6 +1095,73 @@ export class ColonyController {
     return { ok: true };
   }
 
+  /**
+   * What importing a Raven Colonial export would change. Writes nothing.
+   *
+   * ★ SQUADRON OWNER, 2026-08-24: "Import wins, and say so." ★
+   *
+   * Two routes rather than one, because the saying-so has to happen before the winning. The worst
+   * outcome here is silently replacing a plan somebody spent an evening on, so the member sees the
+   * consequences — including what they would lose — and then decides.
+   *
+   * COLONY_VIEW to preview: reading what a file WOULD do to a plan you can already open discloses
+   * nothing you could not see by opening it. Applying needs the edit right, checked in the service
+   * against whose plan it is.
+   */
+  @Post('plans/:id/import/preview')
+  async previewImport(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { file?: unknown } = {},
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const read = await this.plans_.previewImport(id, me.userId, body.file);
+    if (read === null) {
+      /*
+       * One answer for "no such plan", "not yours to see" and "that file could not be read". The
+       * first two must not be distinguishable — the same reasoning the project routes follow — and
+       * the third is reported in the preview's own words when the file parses at all.
+       */
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'That file could not be read as a Raven Colonial export.',
+      );
+    }
+
+    return { preview: read.preview, system: read.file.systemName };
+  }
+
+  /** Applies the import. Slot counts only — see the service for why structures are not written. */
+  @Post('plans/:id/import')
+  async applyImport(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { file?: unknown } = {},
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_POST,
+      'You cannot edit colonisation plans.',
+    );
+
+    const done = await this.plans_.applyImport(id, me.userId, mask, body.file);
+    if (done === null) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'That file could not be read as a Raven Colonial export.',
+      );
+    }
+
+    return done;
+  }
+
   @Post('plans/:id/sites')
   async addPlanSite(
     @User() caller: CurrentUser | undefined,

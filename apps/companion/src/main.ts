@@ -22,6 +22,8 @@ import {
   colonyAtMarket,
   colonyBuildType,
   addPlanSite,
+  previewPlanImport,
+  applyPlanImport,
   attachCarrier,
   colonyBuildTypes,
   colonyClose,
@@ -2573,6 +2575,17 @@ if (!app.requestSingleInstanceLock()) {
         surface: count(b['surface']),
       });
     });
+
+    /*
+     * The Raven import: preview, then apply. Two calls because nothing is written until the member
+     * has seen what would change — see `raven-preview.ts` for why that is not optional.
+     */
+    ipcMain.handle('colonyPlanImportPreview', (_e, id: unknown, file: unknown) =>
+      previewPlanImport(hub(), asText(id), typeof file === 'string' ? file : ''),
+    );
+    ipcMain.handle('colonyPlanImportApply', (_e, id: unknown, file: unknown) =>
+      applyPlanImport(hub(), asText(id), typeof file === 'string' ? file : ''),
+    );
 
     ipcMain.handle('colonyPlanAddSite', (_e, id: unknown, body: unknown) => {
       const b = (body ?? {}) as Record<string, unknown>;
