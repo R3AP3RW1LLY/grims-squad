@@ -96,18 +96,79 @@ function SiteEconomyLine({
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1]);
 
+  return <EconomyDisclosure economy={economy} ranked={ranked} />;
+}
+
+/**
+ * The leading economy, and — on request — why.
+ *
+ * ★ IT WAS A TOOLTIP, WHICH IS THE SAME AS HIDDEN — 2026-08-24 ★
+ *
+ * The whole audit was already computed and already sent: every buff and nerf with its reason,
+ * "+0.4 agriculture — terraformable", "-0.4 agriculture — an icy body grows nothing". All of it
+ * lived in a `title` attribute.
+ *
+ * A `title` is invisible until somebody happens to hover the right eight characters, never appears
+ * on a touch screen at all, and is not reachable from the keyboard. So the single thing that
+ * explains WHY a body ended up industrial rather than agricultural — the thing somebody is actually
+ * deciding from — was effectively not shown, on both surfaces, while looking implemented.
+ *
+ * A disclosure instead: closed by default because a tree of thirty bodies each showing six audit
+ * lines is unreadable, and open on demand because that is the question the panel exists to answer.
+ */
+function EconomyDisclosure({
+  economy,
+  ranked,
+}: {
+  economy: SiteEconomy;
+  ranked: ReadonlyArray<[string, number]>;
+}) {
+  const [open, setOpen] = useState(false);
+  const links = economy.strongLinks.length + economy.weakLinks.length;
+
   return (
-    <span
-      className="ml-2 font-mono text-[10px] text-[var(--color-brand-cyan-bright)]"
-      title={
-        `${ranked.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}` +
-        `\n\n${economy.audit.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${a.economy} — ${a.reason}`).join('\n')}`
-      }
-    >
-      {economy.leading}
-      {economy.strongLinks.length + economy.weakLinks.length > 0
-        ? ` · fed by ${economy.strongLinks.length + economy.weakLinks.length}`
-        : ''}
+    <span className="ml-2 inline-flex flex-col align-top">
+      <button
+        type="button"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        className="cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[10px] text-[var(--color-brand-cyan-bright)] underline decoration-dotted underline-offset-2"
+      >
+        {economy.leading}
+        {links > 0 ? ` · fed by ${links}` : ''}
+      </button>
+
+      {open && (
+        <span className="mt-1 flex flex-col gap-0.5 font-mono text-[10px]">
+          <span className="text-[var(--color-text-secondary)]">
+            {ranked.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}
+          </span>
+          {/*
+            Buffs and nerfs coloured apart. A nerf is not a smaller buff — "an icy body grows
+            nothing" is the reason a member should stop trying to farm there, and it reads as
+            encouragement in the same colour as a bonus.
+          */}
+          {economy.audit.map((a) => (
+            <span
+              key={`${a.economy}-${a.reason}`}
+              className={
+                a.delta > 0
+                  ? 'text-[var(--color-semantic-success)]'
+                  : 'text-[var(--color-semantic-warning)]'
+              }
+            >
+              {a.delta > 0 ? '+' : ''}
+              {a.delta} {a.economy} — {a.reason}
+            </span>
+          ))}
+          {economy.audit.length === 0 && (
+            // Said, rather than an empty gap under an expanded row that looks like a failed load.
+            <span className="text-[var(--color-text-dim)]">
+              Nothing about this body helps or hinders it.
+            </span>
+          )}
+        </span>
+      )}
     </span>
   );
 }
