@@ -84,6 +84,13 @@ state rather than a flag. The cleanest shape is a separate `visibility` on a per
 (`private` | `squadron`) so "who owns it" and "who can see it" stop being the same question — the
 conflation is what makes the current model unable to express this.
 
+**Smaller than it first looks (found 2026-08-24).** That separation already exists on the other
+half of the module: `ColonyProject` carries a `ColonyVisibility` enum of exactly
+`private | squadron | public`, alongside its own `owner`. So this is not a new concept to design —
+it is the same field, on plans, following a pattern already proven in production on projects. The
+`public` state is deliberately not wanted here: the ruling was squadron-visible, and a plan on a
+public link is a different feature nobody asked for.
+
 Every read path that currently resolves visibility has to learn the third state. That is the bulk of
 the work and the part most likely to leak: the failure mode is a plan becoming visible somewhere
 nobody intended, so each read path needs a test rather than an audit.
