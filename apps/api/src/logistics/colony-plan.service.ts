@@ -417,6 +417,72 @@ export class ColonyPlanService {
   }
 
   /** Every plan the caller may see. */
+  /**
+   * Systems this member has claimed and not yet planned.
+   *
+   * ★ THE GAP THIS FILLS — 2026-08-24 ★
+   *
+   * Every colonisation event the platform collected was about a construction site that already
+   * exists. So it could describe every build in detail and could not answer "which systems have we
+   * taken" — except by inferring it from builds somebody had already started, which misses every
+   * claim nobody has built on. Those are exactly the ones that still need planning, and exactly the
+   * ones a member forgets about.
+   *
+   * ★ AN OFFER, NOT AN AUTOMATIC PLAN ★
+   *
+   * The tempting move is to create a plan the moment a claim arrives. That writes rows into
+   * somebody's planner because of something their game did, which is the kind of helpfulness that
+   * is indistinguishable from a bug when it is wrong — and a member who claims a system to deny it
+   * to somebody else has not asked for a plan at all.
+   *
+   * ★ SCOPED TO THE CALLER, ALWAYS ★
+   *
+   * A claim is a statement about a member's own intentions, and the catalogue entry promises
+   * exactly that. Widening this to the squadron would publish something members agreed to send us,
+   * not to show each other.
+   */
+  async claimedWithoutPlan(
+    callerId: string,
+  ): Promise<ReadonlyArray<{ systemName: string; claimedAt: Date }>> {
+    /*
+     * `category` first so the (category, occurred_at) index is usable — there is no index on
+     * event_type, and this runs on a page load.
+     *
+     * DISTINCT ON keeps the NEWEST claim per system: a system can be claimed, lost and reclaimed,
+     * and the useful date is the one that still applies.
+     */
+    const rows = await this.db.$queryRawUnsafe<Array<{ system_name: string; claimed_at: Date }>>(
+      `SELECT DISTINCT ON (payload->>'StarSystem')
+              payload->>'StarSystem' AS system_name,
+              occurred_at            AS claimed_at
+         FROM telemetry_events
+        WHERE user_id = $1::uuid
+          AND category = 'colonisation'
+          AND event_type = 'ColonisationSystemClaim'
+          AND coalesce(payload->>'StarSystem', '') <> ''
+        ORDER BY payload->>'StarSystem', occurred_at DESC`,
+      callerId,
+    );
+    if (rows.length === 0) return [];
+
+    /*
+     * Matched case-insensitively against EVERY plan for those systems, not just the caller's: a
+     * member who claimed a system an officer has already planned as a squadron build does not need
+     * telling to plan it again.
+     */
+    const planned = await this.db.colonyPlan.findMany({
+      where: { systemName: { in: rows.map((r) => r.system_name), mode: 'insensitive' } },
+      select: { systemName: true },
+    });
+    const taken = new Set(planned.map((p) => p.systemName.trim().toLowerCase()));
+
+    return rows
+      .filter((r) => !taken.has(r.system_name.trim().toLowerCase()))
+      // Newest first: the claim somebody just made is the one they are thinking about.
+      .sort((a, b) => b.claimed_at.getTime() - a.claimed_at.getTime())
+      .map((r) => ({ systemName: r.system_name, claimedAt: r.claimed_at }));
+  }
+
   async list(owner: 'squadron' | 'personal' | 'all', callerId: string): Promise<readonly PlanDetail[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.system_id64::text AS system_id64,

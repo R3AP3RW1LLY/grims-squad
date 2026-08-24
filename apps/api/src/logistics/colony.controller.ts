@@ -969,6 +969,24 @@ export class ColonyController {
   }
 
   /**
+   * Systems the caller has claimed in game and not planned yet.
+   *
+   * Read straight from their own journal uploads. Scoped to the caller and never widened — a claim
+   * is a statement about somebody's intentions, and the consent catalogue promises exactly that.
+   */
+  @Get('plans/claimed')
+  async claimed(@User() caller: CurrentUser | undefined) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return { claimed: await this.plans_.claimedWithoutPlan(me.userId) };
+  }
+
+  /**
    * The plan as a build book — one printable HTML file.
    *
    * Squadron owner: "the build guide generator is also not anywhere i can find it?"

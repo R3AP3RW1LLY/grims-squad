@@ -156,6 +156,10 @@ declare global {
        * so the app holds the shape and none of the arithmetic.
        */
       owed(): Promise<Answer<MergedNeeds>>;
+      /** Systems claimed in game with no plan yet. An offer to plan them, never an automatic plan. */
+      claimedSystems(): Promise<
+        Answer<{ claimed: Array<{ systemName: string; claimedAt: string }> }>
+      >;
       /**
        * Marking the build the member is hauling to RIGHT NOW. One per member, held by the hub —
        * it is what the build overlay follows wherever they fly.

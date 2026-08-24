@@ -1310,6 +1310,24 @@ export class ColonyDeviceController {
     return { plans: await this.plans_.list(scope, me.userId) };
   }
 
+  /**
+   * Systems the caller has claimed in game and not planned yet.
+   *
+   * Declared BEFORE `plans/:id` deliberately — routes match in order, and `:id` would otherwise
+   * swallow "claimed" and answer "no such plan" for a route that exists.
+   */
+  @Public()
+  @Get('plans/claimed')
+  async claimed(@Req() req: FastifyRequest) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return { claimed: await this.plans_.claimedWithoutPlan(me.userId) };
+  }
+
   @Public()
   @Get('plans/:id')
   async plan(@Req() req: FastifyRequest, @Param('id') id: string) {
