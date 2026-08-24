@@ -69,6 +69,10 @@ export interface PlanBody {
   readonly orbitalSlots: number | null;
   readonly surfaceSlots: number | null;
   readonly slotsBy: string | null;
+  /** When the counts were set. Null when nothing has set them. */
+  readonly slotsAt: string | null;
+  /** `typed`, `import`, or null for a row that predates the column being recorded. */
+  readonly slotsSource: 'typed' | 'import' | null;
 }
 
 export interface PlanSite {
@@ -402,7 +406,16 @@ export class ColonyPlanService {
 
     const changed = await this.db.$executeRawUnsafe(
       `UPDATE colony_bodies
-          SET orbital_slots = $3, surface_slots = $4, slots_by_id = $5::uuid, slots_at = now()
+          SET orbital_slots = $3, surface_slots = $4, slots_by_id = $5::uuid, slots_at = now(),
+              -- ★ MARKED AS TYPED, BECAUSE IT IS — 2026-08-24 ★
+              --
+              -- This is the hand-entry path: a member reading the architect view and typing what
+              -- they see. Leaving the source null would make every new row indistinguishable from
+              -- an imported one, which is the distinction "Import wins, AND SAY SO" rests on.
+              --
+              -- Rows written before this column are null and are READ as typed, which is honest:
+              -- typing was the only way they could have arrived. New ones can say so outright.
+              slots_source = 'typed'
         WHERE system_id64 = $1::bigint AND body_id = $2`,
       input.systemId64.toString(),
       input.bodyId,
@@ -1045,7 +1058,8 @@ export class ColonyPlanService {
       `SELECT b.body_id, b.name, b.kind, b.sub_type, b.is_landable, b.gravity, b.temperature,
               b.distance_ls, b.has_rings, b.terraformable, b.has_volcanism, b.has_atmosphere,
               b.parent_body_id,
-              b.orbital_slots, b.surface_slots, u.display_name AS slots_by
+              b.orbital_slots, b.surface_slots, u.display_name AS slots_by,
+              b.slots_at, b.slots_source
          FROM colony_bodies b
          LEFT JOIN users u ON u.id = b.slots_by_id
         WHERE b.system_id64 = $1::bigint
@@ -1074,6 +1088,22 @@ export class ColonyPlanService {
       orbitalSlots: r['orbital_slots'] === null ? null : Number(r['orbital_slots']),
       surfaceSlots: r['surface_slots'] === null ? null : Number(r['surface_slots']),
       slotsBy: r['slots_by'] === null ? null : String(r['slots_by']),
+      slotsAt: r['slots_at'] === null ? null : new Date(String(r['slots_at'])).toISOString(),
+      /*
+       * ★ WHERE THE COUNTS CAME FROM — 2026-08-24 ★
+       *
+       * Squadron owner: "Import wins, and say so." `slotsBy` and `slotsAt` cannot say so on their
+       * own — an import stamps a member and a date exactly as typing does. Without this the preview
+       * of a SECOND import would announce that counts the member never typed are about to be
+       * replaced, which is the kind of false warning that teaches people to click through real ones.
+       *
+       * Null for rows that predate the column, and read as typed: before it existed, typing was the
+       * only way those numbers could have arrived.
+       */
+      slotsSource:
+        r['slots_source'] === 'typed' || r['slots_source'] === 'import'
+          ? (r['slots_source'] as 'typed' | 'import')
+          : null,
     }));
   }
 

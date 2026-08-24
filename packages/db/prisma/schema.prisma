@@ -2649,6 +2649,24 @@ model ColonyBody {
   /// Who entered them and when, so a wrong number has an author rather than being anonymous.
   slotsById    String?   @map("slots_by_id") @db.Uuid
   slotsAt      DateTime? @map("slots_at") @db.Timestamptz(6)
+  /// Where the counts came from: `typed` or `import`.
+  ///
+  /// * SQUADRON OWNER, 2026-08-24: "Import wins, and say so." *
+  ///
+  /// A Raven Colonial export carries the architect view's own slot counts, and the ruling is that
+  /// they overrule anything typed by hand. `slotsById` and `slotsAt` cannot express that: an import
+  /// would stamp the importing member's id and today's date, which is exactly what a member typing
+  /// the numbers looks like. The "say so" half of the ruling would be silently lost, and a figure
+  /// nobody chose would carry somebody's name.
+  ///
+  /// Null for every row that predates this column, which is honest — the platform genuinely does
+  /// not know how those were entered, and defaulting them to `typed` would be inventing a fact
+  /// about somebody's work. Read as "typed" for display, because that is what it was before an
+  /// import existed, but the null survives so the two remain distinguishable.
+  ///
+  /// Not an enum: an unrecognised value must degrade to "we do not know" rather than break the
+  /// planner for a whole system, the same reasoning ColonyBlocSystem.role is written down with.
+  slotsSource  String?   @map("slots_source")
 
   system ColonySystem     @relation(fields: [systemId64], references: [id64], onDelete: Cascade)
   sites  ColonyPlanSite[]
