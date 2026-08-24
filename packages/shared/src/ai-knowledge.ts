@@ -48,18 +48,6 @@ export const KNOWLEDGE_SOURCES = [
   'reference',
   /** Our own forum: accepted answers and highly-rated posts. */
   'forum',
-  /*
-   * ★ SYSTEMS A MEMBER ACTUALLY FLEW TO ★
-   *
-   * Written by `live-systems.ts` from a paired companion's journal, and MISSING FROM THIS LIST until
-   * 2026-08-22 — so it was absent from `EMBEDDED_SOURCES`, no sweep ever selected those rows, and
-   * 5,917 of them sat with text and a NULL embedding from the day the feature shipped.
-   *
-   * The exhaustive Records below are meant to make exactly that a compile error. They could not:
-   * those rows are inserted with `$executeRawUnsafe` and the source as a SQL string literal, which
-   * the compiler never sees. `knowledge-source-declared.spec.ts` reads the SQL instead.
-   */
-  'companion',
 ] as const;
 export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
 
@@ -121,16 +109,6 @@ export const STORAGE_KIND: Record<KnowledgeSource, 'lookup' | 'vector' | 'both'>
   /** Prose. There is nothing to look these up BY except their meaning. */
   reference: 'vector',
   forum: 'vector',
-  /*
-   * `both`, like the galaxy rows they sit beside. A member asks for these by NAME ("have we been to
-   * Colonia") which is a lookup, and by DESCRIPTION ("somewhere we have been with a water world")
-   * which is not.
-   *
-   * Safe to embed despite being live data: `live-systems.ts` never rewrites `text` and nothing in
-   * the codebase clears `embedding`, so each vector is written once. This is not the continuous
-   * rewriting that market snapshots would have caused.
-   */
-  companion: 'both',
 };
 
 /** Every source whose text should carry a vector. Derived, so it can never drift from the table. */
@@ -169,12 +147,6 @@ export const EMBED_EVERY_MINUTES: Record<KnowledgeSource, number> = {
   eddn: 5,
   /** The roster changes when somebody joins or is promoted. Daily is plainly enough. */
   inara: 1_440,
-  /*
-   * Daily, and deliberately not hourly. A sweep of 200 rows or more ends in a REINDEX of the vector
-   * index; at its full size that is a nightly operation, not an hourly one. Members do not fly
-   * somewhere new and then immediately ask the assistant about it.
-   */
-  companion: 1_440,
   /** Both follow their ingest — there is nothing new between runs, so a sweep would find nothing. */
   galaxy: 1_440,
   coriolis: 180,
@@ -255,28 +227,6 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
   reference: 0.5,
   /** Every half hour. An accepted answer should be usable by the assistant the same session. */
   forum: 0.5,
-  /*
-   * ★ NOT A SCHEDULE — A DEADLINE, exactly like `eddn` above ★
-   *
-   * Nothing pulls this. Paired companions PUSH systems as members fly, so there is no "companion
-   * ingest" to start; `RESIDENT` in the worker's scheduler is what keeps it from being started.
-   *
-   * ★ ONE HOUR, AND IT IS AN ALARM — SQUADRON OWNER, 2026-08-22 ★
-   *
-   * "we need this to work just like the realtime ingestion of market prices ... make it work
-   * exactly like the worker we built for: Live markets"
-   *
-   * So it works exactly like `eddn` above. The worker closes a reporting window every fifteen
-   * minutes (COMPANION_WINDOW_MINUTES) whether or not anybody is flying, so four are expected inside
-   * the hour and "overdue" can only mean the reporting itself has stopped.
-   *
-   * It was 24 first, which is not an alarm — it is a whole day in which the pairing path could be
-   * dead and the page would look content. And it was `0` before that, which broke three scheduler
-   * tests and deserved to: zero does not read as "never pulls", it reads as "due right now, and
-   * again next tick, for ever", and it collapsed the shortest-cadence check that keeps TICK_MS
-   * honest.
-   */
-  companion: 1,
 };
 
 /** What the training page shows for one source. */
@@ -410,7 +360,6 @@ export const SOURCE_LABELS: Record<KnowledgeSource, string> = {
   inara: 'Squadron roster',
   reference: 'Guides and reference',
   forum: 'Answered forum questions',
-  companion: 'Systems our members have flown to',
 };
 
 /**
@@ -429,60 +378,4 @@ export const SOURCE_ANSWERS: Record<KnowledgeSource, string> = {
   inara: 'Who is in the squadron and what rank they hold',
   reference: 'How the game works — mechanics, lore, our own guides',
   forum: 'Questions this squadron has already answered',
-  companion: 'Systems the squadron has actually visited, as their companions reported them',
 };
-
-/**
- * Rows that describe a PLACE rather than an idea.
- *
- * ★ THE INVARIANT THAT QUIETLY STOPPED BEING TRUE — 2026-08-22 ★
- *
- * `KnowledgeService.semantic` carried this comment for months, and it was correct when written:
- *
- *     "Restricted to embedded sources by construction: the query returns rows whose embedding is
- *      not null, and only prose sources are ever embedded (see STORAGE_KIND)."
- *
- * Then the squadron owner asked for full EDDN coverage and 687,000 systems and stations were
- * embedded. The comment stayed. The code stayed. The invariant it depended on was gone.
- *
- * The result, measured in production: "how do I become a member of the squadron" returned five
- * system names. Not because retrieval was wrong — because 302 prose rows were being asked to
- * compete with 687,000 places inside one approximate index, and approximate search lost them.
- *
- * ★ SO THE SEPARATION IS ENFORCED, NOT ASSUMED ★
- *
- * A prose question searches prose. A place question searches places. Neither can drown the other,
- * however many systems the galaxy import adds — and it will add millions. This list is what makes
- * that structural rather than a tuning parameter somebody has to keep ahead of.
- */
-export const PLACE_KINDS = ['system', 'station', 'visited-system', 'visited-station'] as const;
-
-export type PlaceKind = (typeof PLACE_KINDS)[number];
-
-/** True for a row describing somewhere you can fly to. */
-export function isPlaceKind(kind: string): boolean {
-  return (PLACE_KINDS as readonly string[]).includes(kind);
-}
-
-/**
- * The vector indexes retrieval actually plans against.
- *
- * ★ FOUND 2026-08-23: THE REBUILD WAS AIMED AT THE WRONG INDEX ★
- *
- * `embedKnowledge` rebuilt `knowledge_items_embedding_idx` after every sweep — the single shared
- * index that the prose/place split replaced. So it spent a long CONCURRENT rebuild on an index no
- * query plans against, and never rebuilt the two that every query now uses.
- *
- * Left alone the place index would have degraded exactly as the shared one did: retrieval still
- * returning rows, and them simply being the wrong ones.
- *
- * ★ NAMED HERE SO THE JOB AND THE MIGRATIONS CANNOT DRIFT ★
- *
- * These strings exist in three places — the migrations that create them, the queries whose
- * predicates must match, and the job that rebuilds them. A hardcoded name in the job is exactly how
- * this went wrong once already.
- */
-export const VECTOR_INDEXES = [
-  'knowledge_items_embedding_prose_idx',
-  'knowledge_items_embedding_place_idx',
-] as const;

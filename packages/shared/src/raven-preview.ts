@@ -31,8 +31,25 @@ export interface CurrentBody {
   readonly name: string;
   readonly orbitalSlots: number | null;
   readonly surfaceSlots: number | null;
-  /** When somebody last set those counts by hand. Null when nobody has. */
+  /** When those counts were last set. Null when nobody and nothing has set them. */
   readonly slotsAt: string | null;
+  /**
+   * Where they came from: `typed`, `import`, or null for a row that predates the column.
+   *
+   * ★ WITHOUT THIS, THE SECOND IMPORT LIES ★
+   *
+   * `slotsAt` alone cannot tell a member's typing from a previous import — both stamp a member id
+   * and a date. So re-importing the same file would announce "3 slot counts you entered by hand
+   * will be replaced", naming work the member never did, about numbers that came from the very file
+   * they are importing again.
+   *
+   * A warning that cries wolf on a routine action is worse than no warning: it is the one that
+   * teaches people to click through the real one.
+   *
+   * Optional because callers built before the column existed pass nothing, and a row that predates
+   * it is honestly unknown rather than assumed.
+   */
+  readonly slotsSource?: 'typed' | 'import' | null | undefined;
 }
 
 /** A site the plan already holds. */
@@ -117,10 +134,21 @@ export function previewRavenImport(
       from: { orbital: body.orbitalSlots, surface: body.surfaceSlots },
       to: { orbital: incoming.orbital, surface: incoming.surface },
       /*
-       * `slotsAt` is the record of somebody having typed these. Its presence is what turns "filling
-       * in a blank" into "overruling a person", and those two need to read differently on screen.
+       * ★ ONLY A PERSON CAN BE OVERRULED ★
+       *
+       * `slotsAt` says the counts were set; it cannot say by what. An earlier import stamps a member
+       * id and a date exactly as typing does, so testing `slotsAt` alone would have a second import
+       * announce "3 counts you entered by hand will be replaced" — naming work the member never did,
+       * about figures from the very file they are importing again.
+       *
+       * A warning that cries wolf on a routine action is worse than none: it is what teaches people
+       * to click through the real one. So an import replacing an import is just a change, and only
+       * replacing something a person entered is a loss.
+       *
+       * A null source is treated as typed. Those rows predate the column and were, in fact, all
+       * typed — there was no other way to enter them — so warning about them is right.
        */
-      overwritesTyped: body.slotsAt !== null,
+      overwritesTyped: body.slotsAt !== null && body.slotsSource !== 'import',
     };
 
     if (body.orbitalSlots === null && body.surfaceSlots === null) slotsAdded.push(change);

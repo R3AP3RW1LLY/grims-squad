@@ -1,0 +1,41 @@
+-- Where a body's slot counts came from.
+--
+-- ★ SQUADRON OWNER, 2026-08-24: "Import wins, and say so." ★
+--
+-- A Raven Colonial export carries the in-game architect view's own orbital and surface slot counts,
+-- and the ruling is that they overrule anything a member typed by hand. The winning half is easy.
+-- The saying-so half had nowhere to live.
+--
+-- `colony_bodies` already records slots_by_id and slots_at — who set the counts and when. An import
+-- would stamp the importing member's id and today's date, which is character for character what a
+-- member typing the numbers looks like. The distinction the ruling depends on would be lost at the
+-- moment it was made, and a figure nobody chose would carry somebody's name against it.
+--
+-- ★ NULLABLE, WITH NO BACKFILL, DELIBERATELY ★
+--
+-- Every existing row gets NULL rather than 'typed'. The platform genuinely does not know how those
+-- counts were entered — the column did not exist — and writing 'typed' across 65 rows would be
+-- inventing a fact about somebody's work in order to make a column look tidy. Null means "before we
+-- recorded this", which is true, and it stays distinguishable from a row we can actually vouch for.
+--
+-- ★ WHY THIS IS SAFE TO RUN DURING A DEPLOY ★
+--
+-- Adding a NULLABLE column with no default is a catalogue-only change in PostgreSQL 11+: no table
+-- rewrite, no full scan, and the ACCESS EXCLUSIVE lock is held for microseconds rather than for the
+-- length of a rewrite.
+--
+-- That matters here more than it usually would. On 2026-08-22 a CREATE INDEX started during a
+-- deploy blocked every INSERT queued behind it and stalled EDDN ingestion for sixteen minutes. The
+-- rule taken from that is written in this repo's migration notes: never build an index inside a
+-- migration, never CONCURRENTLY (it cannot run in the transaction a migration runs in), and cap
+-- maintenance_work_mem when any operation might want a work area.
+--
+-- This migration builds no index and sorts nothing, so it needs no memory cap and holds no lock
+-- worth measuring. It is one line for a reason.
+--
+-- ★ TEXT RATHER THAN AN ENUM ★
+--
+-- An unrecognised value must degrade to "we do not know" rather than break the planner for a whole
+-- system. The same reasoning colony_bloc_systems.role is written down with, and the same reason
+-- adding a third source later will not need a migration at all.
+ALTER TABLE "colony_bodies" ADD COLUMN "slots_source" TEXT;

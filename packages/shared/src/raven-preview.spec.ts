@@ -94,6 +94,46 @@ describe('previewing a Raven import', () => {
     expect(replaced, 'but the loss is read first').toBeLessThan(added);
   });
 
+  it('★ MANDATORY: replacing a previous IMPORT is not overruling anybody ★', () => {
+    /*
+     * ★ WITHOUT THIS, THE SECOND IMPORT LIES ★
+     *
+     * `slotsAt` says the counts were set; it cannot say by what. An earlier import stamps a member
+     * id and a date exactly as typing does — so re-importing an updated file would announce "you
+     * entered these by hand and they will be replaced", naming work the member never did, about
+     * figures that came from the very file they are importing again.
+     *
+     * A warning that cries wolf on a routine action is worse than none: it is what teaches people to
+     * click through the real one.
+     */
+    const preview = previewRavenImport(
+      file({ slots: [{ bodyNum: 18, orbital: 4, surface: 2 }] }),
+      {
+        bodies: [
+          body({ orbitalSlots: 3, surfaceSlots: 2, slotsAt: '2026-08-24T20:00:00Z', slotsSource: 'import' }),
+        ],
+        sites: [],
+      },
+    );
+
+    expect(preview.slotsChanged, 'it is still a change').toHaveLength(1);
+    expect(preview.slotsChanged[0]?.overwritesTyped, 'but nobody is overruled').toBe(false);
+    expect(describeRavenPreview(preview).join(' ')).not.toMatch(/entered by hand/i);
+  });
+
+  it('a row predating the source column is treated as typed, and warned about', () => {
+    /*
+     * Honest: before the column existed, typing was the only way those numbers could have got
+     * there. Warning is right, and it is the cautious direction regardless.
+     */
+    const preview = previewRavenImport(
+      file({ slots: [{ bodyNum: 18, orbital: 4, surface: 2 }] }),
+      { bodies: [body({ orbitalSlots: 3, surfaceSlots: 2, slotsAt: '2026-08-07T05:34:07Z' })], sites: [] },
+    );
+
+    expect(preview.slotsChanged[0]?.overwritesTyped).toBe(true);
+  });
+
   it('filling an empty body is an addition, not a replacement', () => {
     const preview = previewRavenImport(
       file({ slots: [{ bodyNum: 18, orbital: 3, surface: 2 }] }),
