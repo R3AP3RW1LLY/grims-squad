@@ -461,10 +461,18 @@ export GRIMS_IMAGE_TAG="$TARGET_SHA"
 # stayed up, which is the design working — but the operator is then left re-running a deploy by hand
 # for no reason other than the timer being wrong.
 #
-# `deploy_workers` below already reached this conclusion and gives itself five attempts at sixty
-# seconds; its comment says outright that it "races the image build". The primary races the same
-# build and was never widened to match. Six attempts backing off 15/30/45/60/75s is a little over
-# four minutes, which covers an ordinary build with room to spare.
+# The ingestion box's own fetch loop, further down this file, already reached this conclusion and
+# gives itself five attempts at sixty seconds; its comment says outright that it "races the image
+# build". The primary races the same build and was never widened to match. Six attempts backing off
+# 15/30/45/60/75s is a little over four minutes, which covers an ordinary build with room to spare.
+#
+# ★ THE FUNCTION IS DELIBERATELY NOT NAMED HERE ★
+#
+# `deploy-script.spec.ts` locates that step with a bare `indexOf` on its name and asserts it comes
+# AFTER the health gate — a real safety property, since shipping the workers a build the public box
+# could not serve would take out ingestion for a revision about to be rolled back. Writing the
+# identifier in this comment put an earlier occurrence in the file, the search found the comment
+# instead of the function, and the guard failed. It was right to.
 #
 # Still bounded, and still fatal at the end. Retrying forever would be worse than stopping: nobody
 # watches a script that has gone quiet.
