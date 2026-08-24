@@ -170,6 +170,10 @@
     "./colony-all-needs": {
       "types": "./dist/colony-all-needs.d.ts",
       "default": "./dist/colony-all-needs.js"
+    },
+    "./colony-draft-mode": {
+      "types": "./dist/colony-draft-mode.d.ts",
+      "default": "./dist/colony-draft-mode.js"
     }
   },
   "scripts": {

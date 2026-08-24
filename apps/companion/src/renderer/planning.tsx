@@ -1520,15 +1520,27 @@ function Suggestion({
  * the order those two facts are read in decides which one somebody acts on. Over a cockpit, with a
  * strip this narrow, that ordering is the whole design.
  */
-/** "Draft me a starting layout" — the opt-in half, and nothing it produces touches the plan. */
-function DraftLayout({ systemName }: { systemName: string }): JSX.Element {
+/**
+ * "Draft me a starting layout" — the opt-in half, and nothing it produces touches the plan.
+ *
+ * ★ AND IT ASKS BEFORE IT DRAFTS — SQUADRON OWNER, 2026-08-22 ★
+ *
+ * "if a system already has a partial build ask the user if they want to override it, or if they want
+ * to keep it and we work around it etc."
+ *
+ * The hub decides whether there is anything to ask and words the question — see
+ * `colony-draft-mode.ts` — so the app and the website put the same choice in the same words. What
+ * "override" cannot do is unbuild: a site that became a project exists in the game, and it is worked
+ * around in both modes.
+ */
+function DraftLayout({ systemName, planId }: { systemName: string; planId: string }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<import('../hub-colony.js').DraftedLayout | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const draft = (): void => {
+  const draft = (mode?: 'keep' | 'override'): void => {
     setBusy(true);
-    void window.colony.draftLayout(systemName).then((a) => {
+    void window.colony.draftLayout(systemName, planId, mode).then((a) => {
       setBusy(false);
       if (a.ok) {
         setOut(a.data);
@@ -1541,14 +1553,43 @@ function DraftLayout({ systemName }: { systemName: string }): JSX.Element {
 
   return (
     <div style={{ marginTop: '4px' }}>
-      <Button disabled={busy} onClick={draft}>
+      <Button disabled={busy} onClick={() => draft()}>
         {busy ? 'Laying one out…' : 'Draft me a starting layout'}
       </Button>
 
       {error === null ? null : <Problem>{error}</Problem>}
 
-      {out === null ? null : (
+      {/*
+        The question, in place of a result — there is no result yet. Drafting first and asking
+        afterwards would spend a model call on a layout about to be rejected wholesale.
+      */}
+      {out?.ask == null ? null : (
+        <Card>
+          <p style={{ margin: 0, fontSize: '12px', color: C.text }}>{out.ask.question}</p>
+          {out.ask.fixedNote === null ? null : (
+            <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.dim }}>{out.ask.fixedNote}</p>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+            <Button disabled={busy} onClick={() => draft('keep')}>
+              Keep them and design around them
+            </Button>
+            <Button disabled={busy} onClick={() => draft('override')}>
+              Replace the {out.ask.intendedCount} planned{' '}
+              {out.ask.intendedCount === 1 ? 'structure' : 'structures'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {out === null || out.ask !== null ? null : (
         <div style={{ marginTop: '8px' }}>
+          {/*
+            What could not be moved, on the result too. A member who gets their existing stations
+            back needs to know that was the game's rule rather than the drafter ignoring them.
+          */}
+          {out.keptNote === null ? null : (
+            <p style={{ margin: '0 0 6px', fontSize: '11px', color: C.dim }}>{out.keptNote}</p>
+          )}
           {/* The verdict before the list, for the reason in the block above. */}
           {out.report !== null && !out.report.ok ? (
             <Card>
@@ -1593,7 +1634,14 @@ function DraftLayout({ systemName }: { systemName: string }): JSX.Element {
 }
 
 
-function SystemAdvice({ systemName }: { systemName: string }): JSX.Element {
+function SystemAdvice({
+  systemName,
+  planId,
+}: {
+  systemName: string;
+  /** The plan being laid out, so the drafter knows what is already standing in the system. */
+  planId: string;
+}): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<import('../hub-colony.js').SystemAdvice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1710,7 +1758,7 @@ function SystemAdvice({ systemName }: { systemName: string }): JSX.Element {
             a member who can see "step 4 spends a point that has not been banked" learns something;
             a member handed a silently repaired list learns nothing.
           */}
-          <DraftLayout systemName={systemName} />
+          <DraftLayout systemName={systemName} planId={planId} />
 
           {/*
             What the assistant was told, verbatim. The same reasoning the plan review beside this
@@ -2191,7 +2239,7 @@ function BuildOrder({
       {/* Under the verdict, where "what is wrong with this plan" already lives. */}
       <div style={{ marginBottom: '12px' }}>
         <PlanReview planId={plan.id} />
-        {plan.systemName ? <SystemAdvice systemName={plan.systemName} /> : null}
+        {plan.systemName ? <SystemAdvice systemName={plan.systemName} planId={plan.id} /> : null}
       </div>
 
       <Suggestion plan={plan} canEdit={canEdit} busy={busy} onApply={saveOrder} />

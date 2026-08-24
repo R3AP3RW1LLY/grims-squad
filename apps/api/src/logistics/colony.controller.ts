@@ -600,11 +600,40 @@ export class ColonyController {
    *
    * The checker's verdict comes back with the draft — see `draft()` for why it is never repaired.
    */
+  /**
+   * Lays out a system, working around whatever is already there.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22 ★
+   *
+   * "if a system already has a partial build ask the user if they want to override it, or if they
+   * want to keep it and we work around it etc."
+   *
+   * `planId` names the plan to work around; without it this drafts a fresh system exactly as before.
+   * `mode` is the member's answer, and its absence is not a default — a plan with intentions in it
+   * comes back with a question and no steps, so nobody spends a model call on a layout they are
+   * about to reject.
+   *
+   * The caller's id travels so the service can resolve THEIR visibility of that plan; a draft must
+   * not become a side door onto one they could not otherwise open.
+   */
   @Post('systems/:name/draft')
-  async draftLayout(@User() caller: CurrentUser | undefined, @Param('name') name: string) {
-    this.#requireSession(caller);
+  async draftLayout(
+    @User() caller: CurrentUser | undefined,
+    @Param('name') name: string,
+    @Body() body: { planId?: string; mode?: string } = {},
+  ) {
+    const me = this.#requireSession(caller);
     await this.#assert(caller, Permission.COLONY_POST, 'You cannot post colonisation plans.');
-    return this.advisor.draft(decodeURIComponent(name));
+
+    // Narrowed here rather than trusted: anything that is not one of the two answers is no answer,
+    // which makes the service ask rather than silently picking one.
+    const mode = body.mode === 'keep' || body.mode === 'override' ? body.mode : undefined;
+
+    return this.advisor.draft(decodeURIComponent(name), {
+      ...(typeof body.planId === 'string' && body.planId !== '' ? { planId: body.planId } : {}),
+      callerId: me.userId,
+      ...(mode === undefined ? {} : { mode }),
+    });
   }
 
   @Get('systems/:name/advice')

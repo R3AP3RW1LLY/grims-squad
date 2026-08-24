@@ -37,8 +37,17 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 export function SystemAdvicePanel({
   advice,
   canDraft = false,
+  planId,
 }: {
   advice: SystemAdvice;
+  /**
+   * The plan being laid out, so the drafter knows what is already there.
+   *
+   * Squadron owner, 2026-08-22: a system with a partial build must be worked around rather than
+   * drafted over. Optional because the scout page shows this same panel for a system nobody has
+   * planned — and there `canDraft` is false anyway, so the button that needs it is not rendered.
+   */
+  planId?: string | undefined;
   /**
    * Whether to offer the drafting button.
    *
@@ -180,7 +189,9 @@ export function SystemAdvicePanel({
             advice they have to trust, and this platform has repeatedly found it should not have
             asked for trust.
           */}
-          {canDraft && advice.profile !== null && <DraftLayout systemName={advice.systemName} />}
+          {canDraft && advice.profile !== null && planId !== undefined && (
+            <DraftLayout systemName={advice.systemName} planId={planId} />
+          )}
 
           {advice.facts !== '' && (
             <details className="text-xs">

@@ -248,7 +248,17 @@ declare global {
        */
       systemAdvice(systemName: string): Promise<Answer<SystemAdvice>>;
       /** A proposed layout, with the plan checker's verdict attached. POST — it spends a model call. */
-      draftLayout(systemName: string): Promise<Answer<DraftedLayout>>;
+      /**
+       * Lays out a system, working around whatever is already built in it.
+       *
+       * Squadron owner, 2026-08-22: a partial build is asked about rather than drafted over. The
+       * hub words the question; `mode` is the answer, and its absence is not a default.
+       */
+      draftLayout(
+        systemName: string,
+        planId?: string,
+        mode?: 'keep' | 'override',
+      ): Promise<Answer<DraftedLayout>>;
       planReorder(
         id: string,
         body: { version: number; siteIds: string[] },

@@ -45,23 +45,50 @@ interface DraftResult {
     totalTonnes: number;
   } | null;
   unavailable: string | null;
+  /**
+   * The question to answer before anything is drafted.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22 ★
+   *
+   * "if a system already has a partial build ask the user if they want to override it, or if they
+   * want to keep it and we work around it etc."
+   *
+   * Arrives WITH no steps: the drafter has not run. Asking afterwards would spend a model call, and
+   * half a minute of somebody's evening, on a layout they may be about to reject wholesale.
+   */
+  ask: {
+    question: string;
+    fixedNote: string | null;
+    fixedCount: number;
+    intendedCount: number;
+  } | null;
+  /** What the draft was told it could not move. Null when nothing in the plan is built yet. */
+  keptNote: string | null;
 }
+
+type Mode = 'keep' | 'override';
 
 const CARD =
   'rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-4 py-3';
 
-export function DraftLayout({ systemName }: { systemName: string }) {
+export function DraftLayout({ systemName, planId }: { systemName: string; planId: string }) {
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<DraftResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const draft = async (): Promise<void> => {
+  /*
+   * `planId` travels on every call so the drafter knows what it is working around. Without it this
+   * drafts the system as though it were empty — which is what it used to do, and which on a plan
+   * somebody has already started building produces a layout the game will refuse.
+   */
+  const draft = async (mode?: Mode): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       setOut(
         await apiPost<DraftResult>(
           `/v1/logistics/colony/systems/${encodeURIComponent(systemName)}/draft`,
+          { planId, ...(mode === undefined ? {} : { mode }) },
         ),
       );
     } catch (err) {
@@ -93,8 +120,62 @@ export function DraftLayout({ systemName }: { systemName: string }) {
         </p>
       )}
 
-      {out !== null && (
+      {/*
+        ★ THE QUESTION, BEFORE ANYTHING IS DRAFTED — SQUADRON OWNER, 2026-08-22 ★
+
+        "if a system already has a partial build ask the user if they want to override it, or if
+        they want to keep it and we work around it etc."
+
+        Rendered INSTEAD of a result, because there is no result yet — the server returns the
+        question with no steps rather than drafting first and asking afterwards.
+      */}
+      {out?.ask != null && (
+        <div className="mt-3 rounded border border-[var(--color-border-active)] bg-[var(--color-surface-panel)] px-4 py-3">
+          <p className="m-0 text-sm text-[var(--color-text-primary)]">{out.ask.question}</p>
+
+          {/*
+            What happens either way, said before the buttons rather than after the click. "Override"
+            cannot move a station that is standing, and a member who is not told that would read
+            their existing builds reappearing as the drafter ignoring them.
+          */}
+          {out.ask.fixedNote !== null && (
+            <p className="m-0 mt-2 text-xs text-[var(--color-text-secondary)]">
+              {out.ask.fixedNote}
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void draft('keep')}
+              disabled={busy}
+              className="rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-panel)] px-4 py-2 text-sm text-[var(--color-text-primary)] hover:border-[var(--color-border-active)] disabled:opacity-50"
+            >
+              Keep them and design around them
+            </button>
+            <button
+              type="button"
+              onClick={() => void draft('override')}
+              disabled={busy}
+              className="rounded-md border border-[var(--color-semantic-warning)] px-4 py-2 text-sm text-[var(--color-semantic-warning)] hover:bg-[color-mix(in_srgb,var(--color-semantic-warning)_8%,transparent)] disabled:opacity-50"
+            >
+              Replace the {out.ask.intendedCount} planned{' '}
+              {out.ask.intendedCount === 1 ? 'structure' : 'structures'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {out !== null && out.ask === null && (
         <div className="mt-3 flex flex-col gap-3">
+          {/*
+            What the draft could not move, on the result as well as in the question. A member who
+            gets their existing stations back needs to know that was the platform being honest about
+            what the game allows, not the drafter having ignored them.
+          */}
+          {out.keptNote !== null && (
+            <p className="m-0 text-xs text-[var(--color-text-secondary)]">{out.keptNote}</p>
+          )}
           {/*
             ★ THE VERDICT BEFORE THE LIST ★
 
