@@ -446,18 +446,47 @@ export GRIMS_IMAGE_TAG="$TARGET_SHA"
 # longer held — so "what is production running" became unanswerable, which is the exact question
 # tagging by commit exists to answer.
 #
-# Three attempts with a widening pause. A network read is allowed to fail; making the release
-# process fatal on the first one turns ordinary internet weather into an outage.
+# A network read is allowed to fail; making the release process fatal on the first one turns
+# ordinary internet weather into an outage.
+#
+# ★ THE BUDGET WAS TOO SHORT FOR THE THING IT IS RACING — 2026-08-24 ★
+#
+# It was three attempts with a widening pause: 10s then 20s, so thirty seconds of patience in total.
+# That is enough for internet weather and nowhere near enough for the case that actually happens,
+# which is deploying straight after a merge while the images workflow is still building. That build
+# takes minutes. Thirty seconds loses the race essentially every time.
+#
+# Observed exactly that on 2026-08-24: merged b0ebc9e, deployed immediately, and all four images
+# 404ed for the full thirty seconds. The deploy stopped safely — nothing was replaced and production
+# stayed up, which is the design working — but the operator is then left re-running a deploy by hand
+# for no reason other than the timer being wrong.
+#
+# The ingestion box's own fetch loop, further down this file, already reached this conclusion and
+# gives itself five attempts at sixty seconds; its comment says outright that it "races the image
+# build". The primary races the same build and was never widened to match. Six attempts backing off
+# 15/30/45/60/75s is a little over four minutes, which covers an ordinary build with room to spare.
+#
+# ★ THE FUNCTION IS DELIBERATELY NOT NAMED HERE ★
+#
+# `deploy-script.spec.ts` locates that step with a bare `indexOf` on its name and asserts it comes
+# AFTER the health gate — a real safety property, since shipping the workers a build the public box
+# could not serve would take out ingestion for a revision about to be rolled back. Writing the
+# identifier in this comment put an earlier occurrence in the file, the search found the comment
+# instead of the function, and the guard failed. It was right to.
+#
+# Still bounded, and still fatal at the end. Retrying forever would be worse than stopping: nobody
+# watches a script that has gone quiet.
+FETCH_ATTEMPTS=6
 fetched=false
-for attempt in 1 2 3; do
+for attempt in $(seq 1 $FETCH_ATTEMPTS); do
   if $COMPOSE --profile jobs pull --quiet api web bot worker; then
     fetched=true
     break
   fi
   # No sleep after the last attempt — it would only delay the failure message.
-  if [[ $attempt -lt 3 ]]; then
-    warn "image fetch attempt ${attempt} failed — retrying in $((attempt * 10))s"
-    sleep $((attempt * 10))
+  if [[ $attempt -lt $FETCH_ATTEMPTS ]]; then
+    warn "image fetch attempt ${attempt}/${FETCH_ATTEMPTS} failed — retrying in $((attempt * 15))s (the images workflow may still be building)"
+    sleep $((attempt * 15))
   fi
 done
 
@@ -466,7 +495,7 @@ if [[ $fetched != true ]]; then
   # failed — for this revision, and the honest response is to stop before the swap rather than
   # quietly serve whatever was pulled last time. Retrying forever would be worse than stopping:
   # nobody watches a script that has gone quiet.
-  die "could not fetch images for ${TARGET_SHA:0:8} after 3 attempts — is the images workflow finished? (gh run list --workflow=images.yml)"
+  die "could not fetch images for ${TARGET_SHA:0:8} after ${FETCH_ATTEMPTS} attempts — is the images workflow finished? (gh run list --workflow=images.yml)"
 fi
 ok "images for ${TARGET_SHA:0:8} fetched"
 
