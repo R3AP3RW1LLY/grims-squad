@@ -178,6 +178,10 @@
     "./raven-import": {
       "types": "./dist/raven-import.d.ts",
       "default": "./dist/raven-import.js"
+    },
+    "./raven-preview": {
+      "types": "./dist/raven-preview.d.ts",
+      "default": "./dist/raven-preview.js"
     }
   },
   "scripts": {
