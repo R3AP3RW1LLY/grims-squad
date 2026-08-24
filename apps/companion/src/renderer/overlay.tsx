@@ -275,6 +275,19 @@ export interface OverlayData {
      * The hub has always sent `observedAt` on every need. The overlay simply dropped it.
      */
     readonly observedAt: string | null;
+    /**
+     * Why THIS project and not another.
+     *
+     * ★ SQUADRON OWNER, 2026-08-23 ★
+     *
+     * The panel follows the pad a member is docked at, and falls back to the primary they chose
+     * everywhere else. Both are right, and a panel that switches between them silently is one
+     * nobody trusts — somebody who set a primary and then sees a different project must be able to
+     * tell "you are docked at this one" from "your setting was lost".
+     *
+     * Optional so an older main process, which sends no such field, still renders everything else.
+     */
+    readonly because?: string | undefined;
   } | null;
   /**
    * The run the member picked in the Freight Office.
@@ -688,6 +701,28 @@ function BuildPanel({
         costing a line of the list underneath — which is the part somebody reads mid-flight. The
         `title` field toggle still governs it; see `overlayHeading`.
       */}
+      {/*
+        ★ WHY THIS PROJECT — SQUADRON OWNER, 2026-08-23 ★
+
+        The panel follows the pad the member is docked at and falls back to the primary they chose
+        everywhere else. Silently switching between the two is how a member concludes the setting
+        broke, so the surprising cases say which is happening.
+
+        Only the surprising ones: `because` is absent unless the shared rule judged it worth a row,
+        because a row spent on "you are docked where you are docked" is a row off the needs list.
+      */}
+      {data.because === undefined ? null : (
+        <p
+          style={{
+            margin: '0 0 4px',
+            fontSize: '10px',
+            letterSpacing: '0.08em',
+            color: C.warn,
+          }}
+        >
+          {data.because}
+        </p>
+      )}
       {show('needs') && hidden > 0 ? (
         <p
           style={{

@@ -227,14 +227,65 @@ describe('the overlay payload', () => {
     expect(build?.haulers).toBe(2);
   });
 
-  it('keeps the hub view when docked at some OTHER construction site', () => {
-    // A member restocking at a different depot is still on the business of THEIR build; the panel
-    // does not defect to whatever pad they happen to be parked on.
+  it('★ MANDATORY: docking at ANOTHER construction site shows THAT site ★', () => {
+    /*
+     * ★ THIS TEST USED TO ASSERT THE OPPOSITE — SQUADRON OWNER, 2026-08-23 ★
+     *
+     * It read "keeps the hub view when docked at some OTHER construction site", reasoning that "a
+     * member restocking at a different depot is still on the business of THEIR build".
+     *
+     * Asked directly which should win when the dock and the chosen primary disagree, the owner's
+     * answer was the dock — and the old reasoning had the case wrong. You do not restock at a
+     * construction site; there is nothing to buy there. A member parked on a construction pad is
+     * about to hand cargo over to THAT site, and describing a different project while somebody is
+     * transferring to this one is wrong exactly when it matters most.
+     */
     const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
     const { build } = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
 
+    expect(build?.fromHub, 'the pad in front of them, not the hub').toBe(false);
+    expect(build?.delivered).toBe(92_006);
+  });
+
+  it('★ MANDATORY: it does NOT borrow the primary project’s name for somebody else’s site ★', () => {
+    /*
+     * The hub has told us nothing about a site the member merely flew to. Labelling that pad with
+     * the current build's title would be the exact confusion this change exists to remove — and it
+     * would look authoritative, because the title bar is where members read the project name.
+     */
+    const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
+
+    // Read off the docked station's own name, not the hub's project.
+    expect(build?.title).toBe('Harry’s Dysfunctional Society');
+    expect(build?.haulers, 'and no crew count we did not measure').toBe(0);
+  });
+
+  it('★ MANDATORY: a diversion says so, so it does not read as a lost setting ★', () => {
+    const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
+    const diverted = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
+    expect(diverted.build?.because).toMatch(/not your primary/i);
+
+    /*
+     * And stays quiet when there is nothing to explain — a strip over a cockpit cannot afford a row
+     * telling somebody they are docked where they are docked.
+     */
+    const atOwn = buildOverlayData(input({ currentProject: currentBuild() }));
+    expect(atOwn.build?.because).toBeUndefined();
+  });
+
+  it('an ordinary station does NOT divert the panel', () => {
+    /*
+     * The half of the old reasoning that survives, and the reason `site` rather than `dock` is the
+     * test. A market, a carrier, anywhere cargo is actually bought has no depot heartbeat — so the
+     * member is still working their chosen build and the panel keeps showing it.
+     */
+    const market = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: market, currentProject: currentBuild() }));
+
     expect(build?.fromHub).toBe(true);
     expect(build?.delivered).toBe(100_000);
+    expect(build?.because, 'and nothing to explain').toBeUndefined();
   });
 
   it('falls back to the journal-docked view when no current build is set', () => {

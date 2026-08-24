@@ -9,6 +9,7 @@ import type { TripLedger } from './trip-ledger.js';
  * reaches `node:crypto`. `renderer-imports.spec.ts` fails the build if that rule is broken.
  */
 import { coverNeeds, type Holder } from '@grims/shared/colony-held-cargo';
+import { overlayFocus } from '@grims/shared/overlay-focus';
 import type { OverlayData } from './renderer/overlay.js';
 import { hitRate, type ProspectingState } from './prospector.js';
 import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
@@ -411,13 +412,22 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
  * refreshed every minute in the main process, so the numbers move while the member is three
  * systems away buying the next load.
  *
- * ★ BUT THE DEPOT READING WINS AT THE SITE ITSELF ★
+ * ★ BUT THE DEPOT READING WINS AT ANY CONSTRUCTION SITE — SQUADRON OWNER, 2026-08-23 ★
  *
  * `ColonisationConstructionDepot` fires every fifteen seconds while docked and carries the whole
  * requirement — it is seconds fresher than the hub's copy, needs no network, and works at a site
- * nobody has posted. So when the member is physically docked at their current build, the panel
- * prefers the reading coming off the pad in front of them; the hub still supplies the project's
- * TITLE and hauler count, which no heartbeat carries.
+ * nobody has posted.
+ *
+ * This used to apply only when the member was docked at their OWN current build; docked at any other
+ * site, the panel kept showing the current one, on the reasoning that "a member restocking at a
+ * different depot is still on the business of THEIR build". Asked directly which should win, the
+ * owner's answer was the dock — and they are right, because the case is not restocking. A member
+ * parked on a construction pad is about to hand cargo over to THAT site, and the one moment the
+ * overlay must not be describing a different project is while somebody is transferring to this one.
+ *
+ * The distinction that keeps the old reasoning intact is `site`: an ordinary station — a market,
+ * a carrier, anywhere cargo gets bought — has no depot heartbeat, so it is not a dock for these
+ * purposes and the chosen primary still supplies the list. Only a real construction site diverts it.
  *
  * The journal-only view stays as the fallback for a member with no current build set, docked at a
  * construction site: same behaviour this panel has always had.
@@ -433,18 +443,45 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
    */
   const site = dock !== null && isFresh(dock, input.now) ? dock.site : null;
 
-  if (current !== null) {
-    // Physically at the current build, with a live depot reading: prefer it — see the header.
-    if (site !== null && dock !== null && dock.marketId === current.marketId) {
-      return {
-        ...fromDepot(dock, site, input.hold),
-        // The project's own name and crew, which the heartbeat cannot supply.
-        title: current.title,
-        haulers: current.haulers.length,
-        fromHub: false,
-      };
-    }
+  /*
+   * ★ ONE RULE, SHARED WITH THE WEBSITE ★
+   *
+   * Which project a surface is talking about is decided in `@grims/shared`, so the app and the site
+   * cannot drift on it — and so the sentence explaining the choice is written once. Identity here is
+   * the market id: the dock carries one, the current build carries one, and a site nobody has posted
+   * has no project id to compare at all.
+   */
+  const focus = overlayFocus({
+    dockedProjectId: site !== null && dock !== null ? dock.marketId : null,
+    primaryProjectId: current?.marketId ?? null,
+    activeProjectIds: current === null ? [] : [current.marketId],
+    showAll: false,
+  });
 
+  if (focus.reason === 'docked' && dock !== null && site !== null) {
+    const isPrimary = current !== null && dock.marketId === current.marketId;
+
+    return {
+      ...fromDepot(dock, site, input.hold),
+      /*
+       * The project's own name and crew, which no heartbeat carries — and only when this site IS
+       * the member's current build. At somebody else's site the hub has told us nothing about it,
+       * and borrowing the primary's title would label the pad in front of them with the wrong
+       * project's name, which is the exact confusion this change exists to remove.
+       */
+      ...(isPrimary && current !== null
+        ? { title: current.title, haulers: current.haulers.length }
+        : {}),
+      fromHub: false,
+      /*
+       * Sent only when it earns its row. `notable` is the shared rule's own judgement — see
+       * `overlay-focus.ts`; the panel draws whatever arrives, so neither surface matches on prose.
+       */
+      ...(focus.notable ? { because: focus.because } : {}),
+    };
+  }
+
+  if (current !== null) {
     return {
       title: current.title,
       needs: coveredNeeds(current, input.hold)
@@ -509,12 +546,19 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
        * would understate a list somebody had just updated.
        */
       observedAt: newestObservation(current.needs),
+      /*
+       * Sent only when it earns its row. `notable` is the shared rule's own judgement — see
+       * `overlay-focus.ts`; the panel draws whatever arrives, so neither surface matches on prose.
+       */
+      ...(focus.notable ? { because: focus.because } : {}),
     };
   }
 
-  // No current build set: the journal-docked behaviour this panel has always had.
-  if (site === null || dock === null) return null;
-  return { ...fromDepot(dock, site, input.hold), fromHub: false };
+  /*
+   * No current build and not at a construction site. Nothing to say — and the panel says nothing
+   * rather than an empty grid, for the same reason every other slice here resolves to null.
+   */
+  return null;
 }
 
 /** The panel's numbers, straight off a depot heartbeat. Shared by both docked paths above. */
