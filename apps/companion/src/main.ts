@@ -56,6 +56,7 @@ import {
   colonyRoster,
   colonyUnassign,
   colonyCurrent,
+  colonyOwed,
   colonySetCurrent,
   colonyClearCurrent,
   postColonyProject,
@@ -64,6 +65,7 @@ import {
   setCarrierCargo,
   type CurrentBuild,
 } from './hub-colony.js';
+import type { MergedNeeds } from '@grims/shared/colony-all-needs';
 import { bountyBoard, bountyLeaderboard, reportNoMarket } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
 import { miningRings, miningSessions, miningValuation, type HoldValue } from './hub-mining.js';
@@ -497,6 +499,19 @@ async function pushHold(): Promise<void> {
 let currentProject: CurrentBuild | null = null;
 
 /**
+ * Everything the member owes, across every build they are on.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+ *
+ * Same lifetime and the same failure rule as `currentProject` above: refreshed on the same tick,
+ * pushed on change, and a dropped connection keeps the last good answer rather than blanking the
+ * panel. Null means the hub has not answered yet, which is not the same as owing nothing.
+ */
+let owedAcrossProjects: MergedNeeds | null = null;
+
+/**
  * How often to ask the hub about the current build. Its numbers move on other members' hauling.
  *
  * ★ TEN SECONDS, NOT SIXTY ★
@@ -513,23 +528,52 @@ const CURRENT_BUILD_MS = 10_000;
 
 async function refreshCurrentProject(): Promise<void> {
   if (config.deviceToken === '') {
-    if (currentProject !== null) {
+    if (currentProject !== null || owedAcrossProjects !== null) {
       currentProject = null;
+      owedAcrossProjects = null;
       push();
     }
     return;
   }
 
-  const answer = await colonyCurrent({
+  const call = {
     apiBaseUrl: apiBaseUrlFor(config, process.env),
     deviceToken: config.deviceToken,
-  });
-  if (!answer.ok) return;
+  };
+
+  /*
+   * ★ BOTH LISTS ON ONE TICK — SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * Fetched together rather than on a second timer: they are drawn by the same panel, and two
+   * independent polls would let the focused build and the combined list disagree for a few seconds
+   * every minute — a member watching a delivery land would see one number move and the other not.
+   *
+   * The combined route is deliberately the cheap one — no haulers, no carriers, no charts — so
+   * pairing it costs a fraction of the call it rides along with.
+   */
+  const [answer, owed] = await Promise.all([colonyCurrent(call), colonyOwed(call)]);
 
   // Pushed only on a real change: the overlays are told the moment another member's delivery
   // lands, and a minute of "nothing moved" costs no broadcast at all.
-  const changed = JSON.stringify(answer.data.current) !== JSON.stringify(currentProject);
-  currentProject = answer.data.current;
+  let changed = false;
+
+  if (answer.ok) {
+    changed = JSON.stringify(answer.data.current) !== JSON.stringify(currentProject);
+    currentProject = answer.data.current;
+  }
+
+  /*
+   * Failing soft and INDEPENDENTLY: the combined list is an extra, and losing it must never cost
+   * the member the focused build they are actually hauling to. The previous answer is kept rather
+   * than cleared, for the same reason — a panel that blanks on one failed poll reads as broken.
+   */
+  if (owed.ok) {
+    changed = changed || JSON.stringify(owed.data) !== JSON.stringify(owedAcrossProjects);
+    owedAcrossProjects = owed.data;
+  }
+
   if (changed) push();
 }
 
@@ -1313,6 +1357,8 @@ function push(): void {
       // The hub's whole-project answer rides every push, so the build tracker updates the moment
       // ANYTHING changes — a journal pass, a settings refresh, or the sixty-second hub refetch.
       currentProject,
+      // Fetched on the same tick as the build above, so the two lists cannot disagree mid-poll.
+      owed: owedAcrossProjects,
       trip,
       now: Date.now(),
     }),
@@ -2341,6 +2387,12 @@ if (!app.requestSingleInstanceLock()) {
     );
 
     ipcMain.handle('colonyRoster', (_e, id: unknown) => colonyRoster(hub(), projectId(id)));
+    /*
+     * Everything owed across every build, for the screen. The overlay does NOT come through here —
+     * it is drawn from `owedAcrossProjects`, which the main process already polls on its own tick,
+     * so opening the screen never competes with the panel a member is flying by.
+     */
+    ipcMain.handle('colonyOwed', () => colonyOwed(hub()));
     ipcMain.handle('colonyJoin', (_e, id: unknown) => colonyJoin(hub(), projectId(id)));
     ipcMain.handle('colonyLeave', (_e, id: unknown) => colonyLeave(hub(), projectId(id)));
 

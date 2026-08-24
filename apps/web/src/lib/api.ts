@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import type { LeaderboardKey, SignatureView } from '@grims/shared';
+import type { MergedNeeds } from '@grims/shared/colony-all-needs';
 import type { BannerIdentity } from '../components/forum/banner-render';
 
 /**
@@ -3109,6 +3110,20 @@ export const getColonyProjects = (
 ): Promise<
   AdminRead<{ projects: ColonyProject[]; can: ColonyRights; you?: BoardViewer | null }>
 > => getAdmin(`/v1/logistics/colony/projects?owner=${owner}`);
+
+/**
+ * Everything the reader still owes, across every build they are on.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "SrvSurvey will then show cargo items needed only for the primary or all projects" — and the
+ * standing rule, "we need all of this in full parity on the website and the companion app".
+ *
+ * Merged server-side by the same `mergeNeeds` the companion's route calls, so a member planning a
+ * buying run here and flying it with the app cannot be handed two different lists.
+ */
+export const getColonyOwed = (): Promise<AdminRead<MergedNeeds>> =>
+  getAdmin('/v1/logistics/colony/owed');
 
 export const getColonyProject = (
   id: string,

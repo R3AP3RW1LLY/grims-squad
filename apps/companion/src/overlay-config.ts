@@ -114,7 +114,23 @@ export function overlayHeading(
 export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
   // No 'eta': nothing computes one, so the checkbox was a promise the panel could never keep.
   // Saved configs that still carry it are cleaned on load by exactly the validation named above.
-  build: ['title', 'needs', 'progress', 'haulers'],
+  /*
+   * ★ 'allProjects' — SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * A field rather than a mode, because both lists answer real questions and a member switching
+   * between them mid-flight is fiddling with settings instead of flying. The panel shows the build
+   * in front of them and, underneath, everything they owe everywhere.
+   *
+   * It arrives ON for existing configs — see the `added` rule below, which exists precisely so a new
+   * line does not ship invisible to everybody who has ever opened these settings. The panel keeps it
+   * quiet when the member is on a single build, since there it is the same list printed twice.
+   *
+   * LEGACY_OFFERED still records the list WITHOUT it, and must not be edited to match: that snapshot
+   * is what tells a declined field from one that did not exist yet.
+   */
+  build: ['title', 'needs', 'progress', 'haulers', 'allProjects'],
   /*
    * ★ RENAMED WHEN THE PANEL STOPPED BEING ONE ROUTE — 2026-08-06 ★
    *
@@ -413,8 +429,21 @@ export function normaliseLayout(raw: unknown): OverlayLayout {
         opacity: clamp(Number(style.opacity ?? base.style.opacity), 0.2, 1),
         scale: clamp(Number(style.scale ?? base.style.scale), 0.7, 2),
         accent: accentOf(style.accent),
-        // An empty list is a panel showing nothing, which reads as broken. Fall back to everything.
-        fields: fields.length > 0 ? fields : base.style.fields,
+        /*
+         * An empty list is a panel showing nothing, which reads as broken. Fall back to everything.
+         *
+         * ★ TESTED ON `chosen`, NOT ON `fields` — CAUGHT BY THE SUITE, 2026-08-23 ★
+         *
+         * This read `fields.length`, and the two are the same right up until a release adds a field.
+         * Then a config whose every saved field is unknown to this version has `chosen` empty but
+         * `fields` holding the newly-added one — so instead of falling back to the whole panel, the
+         * member gets a panel showing ONLY the new line, having chosen nothing of the sort.
+         *
+         * `chosen` is the member's own surviving choice, and it is the only thing this fallback was
+         * ever asking about. Deselecting everything by hand still restores the full panel, exactly
+         * as before.
+         */
+        fields: chosen.length > 0 ? fields : base.style.fields,
         // Recorded so the NEXT release can tell a declined field from one that did not exist.
         offered: [...OVERLAY_FIELDS[id]],
       },

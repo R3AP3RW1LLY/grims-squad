@@ -125,6 +125,21 @@ export interface ProjectRow {
   readonly coords: { readonly x: number; readonly y: number; readonly z: number } | null;
 }
 
+/**
+ * One outstanding line, carrying which build it belongs to.
+ *
+ * Deliberately NOT `NeedDetail`: that shape is read on a project's own page, where saying which
+ * project it belongs to would be repeating the heading. The combined list is the one case where the
+ * project is the most important column, because it is what decides where the cargo goes.
+ */
+export interface OwedNeed {
+  readonly projectId: string;
+  readonly title: string;
+  readonly commodity: string;
+  readonly remaining: number;
+  readonly category: string | null;
+}
+
 export interface NeedDetail {
   readonly commodity: string;
   /**
@@ -783,6 +798,55 @@ export class ColonyService {
       select: { commodity: true, remaining: true, required: true, observedAt: true },
     });
     return withCategories(rows, await commodityCategories(this.db));
+  }
+
+  /**
+   * Everything this member still owes, across every live build they are on.
+   *
+   * ★ SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * ★ MEMBERSHIP IS THE VISIBILITY RULE HERE, AND IT IS THE STRICTER ONE ★
+   *
+   * Every other read on this service resolves the caller's visible-id sets, because a project can be
+   * public, squadron-visible or private and the answer differs. This one does not need to: it is
+   * scoped to builds the caller has JOINED, and you cannot join a build you cannot see. A project
+   * later made private stays joined and stays in this list, which is correct — the member is on the
+   * crew, and hiding what they already signed up to haul would strand cargo they bought for it.
+   *
+   * ★ ONE QUERY, BECAUSE THE APP ASKS ON A TIMER ★
+   *
+   * The per-project route deliberately skips the expensive extras for the same reason. This returns
+   * only what a shopping list needs — no haulers, no carriers, no charts — so the combined view
+   * costs less than the single-project one it sits beside.
+   */
+  async everythingOwed(userId: string): Promise<readonly OwedNeed[]> {
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ project_id: string; title: string; commodity: string; remaining: number }>
+    >(
+      /*
+       * The same join `recordHold` uses to decide which builds a hold counts against, so the two
+       * cannot disagree about what "a live build this member is on" means.
+       */
+      `SELECT n.project_id::text AS project_id, p.title, n.commodity, n.remaining::int AS remaining
+         FROM colony_needs n
+         JOIN colony_projects p ON p.id = n.project_id
+         JOIN colony_members m ON m.project_id = p.id AND m.user_id = $1::uuid
+        WHERE p.completed_at IS NULL
+          AND p.abandoned_at IS NULL
+          AND n.remaining > 0`,
+      userId,
+    );
+
+    const categories = await commodityCategories(this.db);
+    return rows.map((row) => ({
+      projectId: row.project_id,
+      title: row.title,
+      commodity: row.commodity,
+      remaining: Number(row.remaining),
+      category: categories.get(row.commodity) ?? null,
+    }));
   }
 
   /**

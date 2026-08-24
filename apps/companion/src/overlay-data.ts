@@ -10,7 +10,8 @@ import type { TripLedger } from './trip-ledger.js';
  */
 import { coverNeeds, type Holder } from '@grims/shared/colony-held-cargo';
 import { overlayFocus } from '@grims/shared/overlay-focus';
-import type { OverlayData } from './renderer/overlay.js';
+import type { MergedNeeds } from '@grims/shared/colony-all-needs';
+import type { OverlayData, OwedAcross } from './renderer/overlay.js';
 import { hitRate, type ProspectingState } from './prospector.js';
 import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
 import { standingFor, EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
@@ -120,6 +121,20 @@ export interface OverlayInput {
    * stops by system rather than order them.
    */
   readonly tradeOrigin?: { readonly x: number; readonly y: number; readonly z: number } | null | undefined;
+  /**
+   * Everything the member owes across every build they are on, merged by the hub.
+   *
+   * ★ SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * Merged SERVER-SIDE, by the same `mergeNeeds` the website calls. The app holds the shape and none
+   * of the arithmetic, so it cannot grow a second implementation that disagrees with the site — the
+   * rule this whole module already follows for everything else the hub knows.
+   *
+   * Null until the hub has answered once, which is different from "you owe nothing".
+   */
+  readonly owed?: MergedNeeds | null | undefined;
 }
 
 /**
@@ -432,6 +447,39 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
  * The journal-only view stays as the fallback for a member with no current build set, docked at a
  * construction site: same behaviour this panel has always had.
  */
+/**
+ * Everything owed everywhere, for the panel's second list.
+ *
+ * ★ QUIET ON A SINGLE BUILD, DELIBERATELY ★
+ *
+ * A member on one project would get their own needs list printed twice under a heading implying it
+ * is something else. Undefined rather than an empty object for the same reason every other slice in
+ * this module distinguishes them: the renderer draws nothing at all instead of an empty section.
+ *
+ * Undefined ALSO covers "we have not asked the hub yet", which is not the same as "you owe nothing"
+ * — but here the two collapse safely, because a second list is an extra rather than a claim, and
+ * a panel that briefly omits an extra is better than one that briefly asserts a member owes nothing.
+ */
+function owedAcross(input: OverlayInput): OwedAcross | undefined {
+  const owed = input.owed ?? null;
+  if (owed === null || owed.projects <= 1 || owed.rows.length === 0) return undefined;
+
+  return {
+    /*
+     * Every row, uncapped — like the needs list above it. A silent top-N would look identical to a
+     * short list, and this is the panel somebody plans a buying run from.
+     */
+    rows: owed.rows.map((r) => ({
+      commodity: r.commodity,
+      tonnes: r.tonnes,
+      shared: r.shared,
+      wantedBy: r.wantedBy.map((w) => ({ title: w.title, tonnes: w.tonnes })),
+    })),
+    projects: owed.projects,
+    totalTonnes: owed.totalTonnes,
+  };
+}
+
 function buildPanel(input: OverlayInput): OverlayData['build'] {
   const dock = input.dock;
   const current = input.currentProject;
@@ -451,6 +499,8 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
    * the market id: the dock carries one, the current build carries one, and a site nobody has posted
    * has no project id to compare at all.
    */
+  const owed = owedAcross(input);
+
   const focus = overlayFocus({
     dockedProjectId: site !== null && dock !== null ? dock.marketId : null,
     primaryProjectId: current?.marketId ?? null,
@@ -478,6 +528,12 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
        * `overlay-focus.ts`; the panel draws whatever arrives, so neither surface matches on prose.
        */
       ...(focus.notable ? { because: focus.because } : {}),
+      /*
+       * On BOTH paths: a member owes what they owe wherever the panel happens to be focused, and
+       * the combined list is most useful precisely when the focused project is not the one they are
+       * about to shop for.
+       */
+      ...(owed === undefined ? {} : { allProjects: owed }),
     };
   }
 
@@ -551,13 +607,44 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
        * `overlay-focus.ts`; the panel draws whatever arrives, so neither surface matches on prose.
        */
       ...(focus.notable ? { because: focus.because } : {}),
+      /*
+       * On BOTH paths: a member owes what they owe wherever the panel happens to be focused, and
+       * the combined list is most useful precisely when the focused project is not the one they are
+       * about to shop for.
+       */
+      ...(owed === undefined ? {} : { allProjects: owed }),
     };
   }
 
   /*
-   * No current build and not at a construction site. Nothing to say — and the panel says nothing
-   * rather than an empty grid, for the same reason every other slice here resolves to null.
+   * ★ NOTHING FOCUSED — BUT POSSIBLY PLENTY OWED ★
+   *
+   * No primary set and not docked at a site. This used to be the end of it, which lost the combined
+   * list in the exact place it is most useful: standing in a commodity market with an empty hold,
+   * which is precisely where a member has neither pinned a build nor docked at one.
+   *
+   * So the panel still draws when there is something to owe. Every focused-project figure is zero
+   * and stays zero — the renderer hides progress at a zero requirement and the crew count at zero
+   * haulers, so nothing here claims a build is empty; it claims no build is in front of them, which
+   * is true.
    */
+  if (owed !== undefined) {
+    return {
+      title: null,
+      needs: [],
+      finished: 0,
+      total: 0,
+      delivered: 0,
+      required: 0,
+      haulers: 0,
+      fromHub: false,
+      observedAt: null,
+      because: focus.because,
+      allProjects: owed,
+    };
+  }
+
+  // Nothing focused and nothing owed. The panel says so in words rather than drawing an empty grid.
   return null;
 }
 

@@ -306,6 +306,14 @@ contextBridge.exposeInMainWorld('colony', {
   roster: (id: string) => ipcRenderer.invoke('colonyRoster', id),
   join: (id: string) => ipcRenderer.invoke('colonyJoin', id),
   leave: (id: string) => ipcRenderer.invoke('colonyLeave', id),
+  /**
+   * Everything the member owes across every build they are on, merged by the hub.
+   *
+   * Squadron owner, 2026-08-23: "SrvSurvey will then show cargo items needed only for the primary
+   * or all projects." The overlay draws it from the main process's own poll; this is the same
+   * answer for the screen, which is opened rather than watched.
+   */
+  owed: () => ipcRenderer.invoke('colonyOwed'),
   /** Marking the build the member is on RIGHT NOW — the one the build overlay follows. */
   setCurrent: (id: string) => ipcRenderer.invoke('colonySetCurrent', id),
   clearCurrent: (id: string) => ipcRenderer.invoke('colonyClearCurrent', id),

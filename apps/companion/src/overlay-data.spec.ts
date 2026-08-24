@@ -295,6 +295,101 @@ describe('the overlay payload', () => {
     expect(build?.delivered).toBe(92_006);
   });
 
+  /* ---------------------------------------------- everything owed, across builds */
+
+  /**
+   * ★ SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * Merged by the hub with the shared rule — see `colony-all-needs.spec.ts`. What is tested here is
+   * only WHEN the panel carries it, which is the part this module decides.
+   */
+  const owed = (projects = 2) => ({
+    rows: [
+      {
+        commodity: 'Steel',
+        tonnes: 800,
+        category: 'Metals',
+        shared: projects > 1,
+        wantedBy: [
+          { projectId: 'p-1', title: 'One', tonnes: 500 },
+          ...(projects > 1 ? [{ projectId: 'p-2', title: 'Two', tonnes: 300 }] : []),
+        ],
+      },
+    ],
+    projects,
+    totalTonnes: 800,
+  });
+
+  it('★ MANDATORY: stays quiet when the member is on a single build ★', () => {
+    /*
+     * There it is the SAME list printed twice, under a heading implying it is something else — and
+     * on a strip over a cockpit every wasted row costs one somebody needed.
+     */
+    const { build } = buildOverlayData(input({ currentProject: currentBuild(), owed: owed(1) }));
+
+    expect(build?.allProjects).toBeUndefined();
+  });
+
+  it('carries the combined list on both the docked and the hub path', () => {
+    // A member owes what they owe wherever the panel happens to be focused.
+    const docked = buildOverlayData(input({ currentProject: currentBuild(), owed: owed() }));
+    expect(docked.build?.allProjects?.projects).toBe(2);
+
+    const away = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    const hub = buildOverlayData(input({ dock: away, currentProject: currentBuild(), owed: owed() }));
+    expect(hub.build?.allProjects?.projects).toBe(2);
+  });
+
+  it('★ MANDATORY: still draws with NOTHING focused — the market case ★', () => {
+    /*
+     * ★ THIS RETURNED null AND LOST THE FEATURE WHERE IT MATTERS MOST ★
+     *
+     * No primary set and not docked at a site is exactly the state of somebody standing in a
+     * commodity market with an empty hold — which is the one place a combined shopping list is the
+     * whole point. The panel had nothing to draw and drew nothing.
+     */
+    const away = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: away, currentProject: null, owed: owed() }));
+
+    expect(build, 'the panel exists').not.toBeNull();
+    expect(build?.allProjects?.rows[0]?.commodity).toBe('Steel');
+    // And claims nothing about a focused build, because there is not one.
+    expect(build?.needs).toEqual([]);
+    expect(build?.required, 'a zero requirement hides the progress bar rather than showing 0%').toBe(0);
+    expect(build?.title).toBeNull();
+  });
+
+  it('draws nothing at all when there is neither a build nor anything owed', () => {
+    const away = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    expect(buildOverlayData(input({ dock: away, currentProject: null })).build).toBeNull();
+  });
+
+  it('★ MANDATORY: absent, not empty, until the hub has answered ★', () => {
+    /*
+     * Null from the hub means "we have not asked yet" and must not render as "you owe nothing
+     * anywhere" — the same distinction this module keeps for the hold and the standing orders.
+     */
+    const { build } = buildOverlayData(input({ currentProject: currentBuild(), owed: null }));
+
+    expect(build?.allProjects).toBeUndefined();
+  });
+
+  it('keeps the split, so a hold is not filled for the wrong site', () => {
+    /*
+     * 800 t across two builds is 800 t to BUY and not 800 t to hand to either of them. Without the
+     * breakdown a member fills a hold for one site and finds half of it unwanted on arrival.
+     */
+    const { build } = buildOverlayData(input({ currentProject: currentBuild(), owed: owed() }));
+
+    expect(build?.allProjects?.rows[0]?.wantedBy).toEqual([
+      { title: 'One', tonnes: 500 },
+      { title: 'Two', tonnes: 300 },
+    ]);
+    expect(build?.allProjects?.rows[0]?.shared).toBe(true);
+  });
+
   /* ------------------------------------------------------------ honest nulls */
 
   it('sends no cargo at all when it could not read a hold', () => {

@@ -46,6 +46,7 @@ import {
   Tabs,
 } from './ui.js';
 import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
+import type { MergedNeeds } from '@grims/shared/colony-all-needs';
 import { needsFreshness, type FreshnessVerdict } from '@grims/shared/needs-freshness';
 import { groupByCategory } from '@grims/shared/commodity-category';
 import { rankOpportunities, type Opportunity } from '@grims/shared/colony-opportunity';
@@ -147,6 +148,14 @@ declare global {
       roster(id: string): Promise<Answer<{ roster: RosterEntry[] }>>;
       join(id: string): Promise<Answer<{ ok: true }>>;
       leave(id: string): Promise<Answer<{ ok: true }>>;
+      /**
+       * Everything the member owes across every build they are on, merged by the hub.
+       *
+       * Squadron owner, 2026-08-23: "SrvSurvey will then show cargo items needed only for the
+       * primary or all projects." The merge is the hub's — the same `mergeNeeds` the website calls —
+       * so the app holds the shape and none of the arithmetic.
+       */
+      owed(): Promise<Answer<MergedNeeds>>;
       /**
        * Marking the build the member is hauling to RIGHT NOW. One per member, held by the hub —
        * it is what the build overlay follows wherever they fly.
