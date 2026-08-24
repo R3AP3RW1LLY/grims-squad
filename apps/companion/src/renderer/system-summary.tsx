@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { SnapshotCompare } from './snapshot-compare.js';
 import {
   EFFECT_KEYS,
   EFFECT_LABELS,
@@ -147,6 +148,9 @@ export function SystemSummary({
           );
         })}
       </div>
+
+      {/* Below the figures it compares, same order as the website. */}
+      <SnapshotCompare summary={summary} />
 
       {note === null ? null : (
         <div style={{ marginTop: '10px', border: `1px solid ${C.hairline}`, borderRadius: '4px', padding: '7px 9px' }}>

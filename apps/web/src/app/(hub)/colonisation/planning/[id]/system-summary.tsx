@@ -6,6 +6,7 @@ import {
   unknownSlotsNote,
 } from '@grims/shared/colony-system-summary';
 import { siteProgress } from '@grims/shared/colony-plan-progress';
+import { SnapshotCompare } from './snapshot-compare';
 import type { ColonyBuildType, ColonyPlan } from '../../../../../lib/api';
 
 /**
@@ -176,6 +177,12 @@ export function SystemSummary({
           );
         })}
       </div>
+
+      {/*
+        The comparison sits below the figures it compares, so a member reads what the system IS
+        before being offered a way to judge a change to it.
+      */}
+      <SnapshotCompare summary={summary} />
 
       {note === null ? null : (
         <div className="mt-3 rounded border border-[var(--color-border-subtle)] px-3 py-2">
