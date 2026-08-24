@@ -114,7 +114,14 @@ import type { LiveService } from '../live/live.service.js';
            */
           // The nudge rides to the sync's markComplete transition, so a build finished by THIS
           // upload announces itself through this process's own SSE service.
-          new ColonyLiveService(db, liveNudgeOf(live)),
+          new ColonyLiveService(db, liveNudgeOf(live), () =>
+            /*
+             * Squadron-wide, because a delivery concerns whoever is watching that project — which
+             * no producer can name. The event carries nothing: watchers re-read through the
+             * endpoint that already decides what they may see.
+             */
+            live?.publish({ type: 'colony', userId: null }),
+          ),
           /*
            * ★ THE MAP, UPDATED FROM WHERE PEOPLE ACTUALLY FLEW — 2026-08-08 ★
            *

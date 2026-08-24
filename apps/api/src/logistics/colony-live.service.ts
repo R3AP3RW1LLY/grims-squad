@@ -46,6 +46,19 @@ export class ColonyLiveService {
      * bridge — so the caller supplies the translation. Optional: rows land without it.
      */
     private readonly nudge?: LiveNudge,
+    /**
+     * Tells every watching browser that this project moved.
+     *
+     * ★ SQUADRON OWNER, 2026-08-23 ★
+     *
+     * `telemetry` is published with the uploading member's id, and the fan-out rule sends a
+     * user-scoped event to that member alone. So when one member delivered, every OTHER member
+     * watching the same project sat on stale figures until they reloaded — and three members
+     * hauling to one site is the ordinary case, not the exception.
+     *
+     * Optional, like the nudge above: rows land whether or not anybody is listening.
+     */
+    private readonly broadcast?: () => void,
   ) {}
 
   /**
@@ -69,6 +82,13 @@ export class ColonyLiveService {
        * measurement.
        */
       await identifyBuildTypes(this.db);
+
+      /*
+       * Announced AFTER the fold, never before: a watcher told to re-read before the ledger row
+       * exists re-reads the old figures and then hears nothing more, which is worse than a second
+       * of staleness — it is a refresh that actively confirms the wrong number.
+       */
+      this.broadcast?.();
 
       /*
        * ★ AND TELL THE PLAN THAT INTENDED IT — SQUADRON OWNER, 2026-08-11 ★
