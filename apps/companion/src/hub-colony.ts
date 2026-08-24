@@ -535,6 +535,11 @@ export interface PlanSiteMarket {
  * renderer. The economy view is exported on its own path for exactly this.
  */
 import type { SystemTrade, SelfSufficiency } from '@grims/shared/colony-economy-view';
+/*
+ * The merge happens on the hub — see `colonyOwed`. Only the SHAPE travels here, so the app cannot
+ * grow a second implementation that disagrees with the website's list.
+ */
+import type { MergedNeeds } from '@grims/shared/colony-all-needs';
 
 export interface PlanOrphanFlag {
   readonly kind: 'dangling-sites' | 'nothing-live' | 'stale';
@@ -951,6 +956,19 @@ export interface CurrentBuild {
 export const colonyCurrent = (
   call: HubCall,
 ): Promise<Answer<{ current: CurrentBuild | null }>> => hubColony(call, '/current');
+
+/**
+ * Everything the member owes, across every build they are on.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+ *
+ * Merged server-side by the same `mergeNeeds` the website calls, so the app and the site cannot
+ * disagree about what is outstanding or the order to buy it in.
+ */
+export const colonyOwed = (call: HubCall): Promise<Answer<MergedNeeds>> =>
+  hubColony(call, '/current/all');
 
 /** Claim a commodity, or — with `userId` — put one on somebody else. */
 export const colonyAssign = (

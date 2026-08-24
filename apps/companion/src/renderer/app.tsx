@@ -32,6 +32,7 @@ import type { BoardViewer, ColonyProject, ColonyRights } from '../hub-colony.js'
 import type { FrontierAccount, FrontierGate } from '../frontier-gate.js';
 import { OverlaysPanel } from './overlays-panel.js';
 import { StationOwnershipPage } from './station-ownership.js';
+import { ColonyOwedPage } from './colony-owed.js';
 
 /**
  * The companion app's window.
@@ -136,6 +137,7 @@ type Page =
   | 'colony-new'
   | 'colony-squadron'
   | 'colony-members'
+  | 'colony-owed'
   | 'colony-ownership'
   | 'bounties'
   | 'lb-bounties'
@@ -270,6 +272,16 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
       { id: 'colony-new', label: 'Start New Project', hint: 'Post the site you are docked at' },
       { id: 'colony-squadron', label: 'Squadron projects', hint: 'What the squadron is building' },
       { id: 'colony-members', label: 'Members’ projects', hint: 'What members have asked help with' },
+      /*
+       * ★ SQUADRON OWNER, 2026-08-23 ★
+       *
+       * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+       *
+       * The two boards above answer "what is the squadron building". This answers "what do I still
+       * owe" — the question somebody has open while deciding what to fill a hold with, which is the
+       * most common reason to open this group at all. Same position as the website's.
+       */
+      { id: 'colony-owed', label: 'What you owe', hint: 'Everything outstanding across your builds' },
       /*
        * Last, and officers only — the website puts it here for the same reason: it is a setting,
        * not a destination. `colonisation-mirror.spec.ts` compares the two menus label for label,
@@ -688,6 +700,7 @@ function App(): JSX.Element {
             onReload={loadColony}
           />
         ) : null}
+        {page === 'colony-owed' ? <ColonyOwedPage /> : null}
         {page === 'colony-ownership' ? <StationOwnershipPage /> : null}
         {page === 'bounties' ? <BountiesPage /> : null}
         {page === 'lb-bounties' ? <LeaderboardPage board="bounties" /> : null}

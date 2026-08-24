@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res }
 import type { FastifyReply } from 'fastify';
 import { PrismaClient } from '@grims/db';
 import { AppError, ErrorCode, Permission, readClaimOwnership, ROLE_PRESETS } from '@grims/shared';
+import { mergeNeeds } from '@grims/shared/colony-all-needs';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
@@ -1232,6 +1233,27 @@ export class ColonyController {
     );
     await this.rosters.leave(id, me.userId);
     return { ok: true };
+  }
+
+  /**
+   * Everything the caller owes, across every build they are on.
+   *
+   * ★ THE SAME ANSWER THE APP GETS — SQUADRON OWNER'S STANDING RULE ★
+   *
+   * "we need all of this in full parity on the website and the companion app." One service call and
+   * one `mergeNeeds`, shared with the device route, so a member planning a buying run on the site
+   * and flying it with the app cannot be handed two different lists.
+   */
+  @Get('owed')
+  async owed(@User() caller: CurrentUser | undefined) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return mergeNeeds(await this.colony.everythingOwed(me.userId));
   }
 
   /**

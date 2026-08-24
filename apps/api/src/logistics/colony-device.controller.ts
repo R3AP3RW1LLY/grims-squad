@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission, readClaimOwnership } from '@grims/shared';
+import { mergeNeeds } from '@grims/shared/colony-all-needs';
 import { Public } from '../auth/auth.guard.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
@@ -743,6 +744,32 @@ export class ColonyDeviceController {
    * which of the three it was is not the overlay's business, and the third must not leak a title
    * through a side door that the project routes would refuse.
    */
+  /**
+   * Everything the member owes, across every build they are on.
+   *
+   * ★ SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * The per-project answer above is the right one docked at a site. This is the one asked standing
+   * in a commodity market with an empty hold and three builds running — and it is a different
+   * question, because the useful fact there is which commodity more than one build wants.
+   *
+   * Merged with the same `mergeNeeds` the website uses, so the two surfaces cannot disagree about
+   * what is outstanding or how it is ordered.
+   */
+  @Public()
+  @Get('current/all')
+  async currentAll(@Req() req: FastifyRequest) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return mergeNeeds(await this.colony.everythingOwed(me.userId));
+  }
+
   @Public()
   @Get('current')
   async current(@Req() req: FastifyRequest) {

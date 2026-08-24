@@ -82,7 +82,13 @@ describe('loading whatever was on disk', () => {
 
   it('keeps a field list the member chose, in their order', () => {
     const layout = normaliseLayout({ build: { style: { fields: ['progress', 'title'] } } });
-    expect(layout.build.style.fields).toEqual(['progress', 'title']);
+
+    /*
+     * The member's own order, first and unchanged. `allProjects` trails it because this fixture
+     * carries no `offered` key — so it is read as a config predating the field, and a field that
+     * could not have been declined arrives on. That is the mechanism working; see the test below.
+     */
+    expect(layout.build.style.fields).toEqual(['progress', 'title', 'allProjects']);
   });
 
   it('MANDATORY: drops fields this version no longer knows', () => {
@@ -91,7 +97,27 @@ describe('loading whatever was on disk', () => {
      * renderer would be asked to draw something that does not exist.
      */
     const layout = normaliseLayout({ build: { style: { fields: ['title', 'wormholes'] } } });
-    expect(layout.build.style.fields).toEqual(['title']);
+
+    // 'wormholes' is gone. 'allProjects' is appended for the reason given above.
+    expect(layout.build.style.fields).toEqual(['title', 'allProjects']);
+    expect(layout.build.style.fields).not.toContain('wormholes');
+  });
+
+  it('★ MANDATORY: an unknown-only list falls back to the WHOLE panel, not to the new field ★', () => {
+    /*
+     * ★ CAUGHT BY THIS SUITE WHEN 'allProjects' LANDED — 2026-08-23 ★
+     *
+     * The fallback tested `fields.length`, which equals `chosen.length` right up until a release
+     * adds a field. Then a config whose every saved field is unknown has nothing chosen but one
+     * field added, so the member got a panel showing ONLY the newest line — having chosen nothing
+     * of the sort, and with no way to tell it from a broken panel.
+     *
+     * The guard now asks about `chosen`, which is the member's own surviving choice and the only
+     * thing this fallback was ever about.
+     */
+    const layout = normaliseLayout({ build: { style: { fields: ['nonsense', 'wormholes'] } } });
+
+    expect(layout.build.style.fields).toEqual([...OVERLAY_FIELDS.build]);
   });
 
   it('falls back to every field rather than showing an empty panel', () => {

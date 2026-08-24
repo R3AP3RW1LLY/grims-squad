@@ -9,7 +9,9 @@ import type { TripLedger } from './trip-ledger.js';
  * reaches `node:crypto`. `renderer-imports.spec.ts` fails the build if that rule is broken.
  */
 import { coverNeeds, type Holder } from '@grims/shared/colony-held-cargo';
-import type { OverlayData } from './renderer/overlay.js';
+import { overlayFocus } from '@grims/shared/overlay-focus';
+import type { MergedNeeds } from '@grims/shared/colony-all-needs';
+import type { OverlayData, OwedAcross } from './renderer/overlay.js';
 import { hitRate, type ProspectingState } from './prospector.js';
 import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
 import { standingFor, EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
@@ -119,6 +121,20 @@ export interface OverlayInput {
    * stops by system rather than order them.
    */
   readonly tradeOrigin?: { readonly x: number; readonly y: number; readonly z: number } | null | undefined;
+  /**
+   * Everything the member owes across every build they are on, merged by the hub.
+   *
+   * ★ SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * Merged SERVER-SIDE, by the same `mergeNeeds` the website calls. The app holds the shape and none
+   * of the arithmetic, so it cannot grow a second implementation that disagrees with the site — the
+   * rule this whole module already follows for everything else the hub knows.
+   *
+   * Null until the hub has answered once, which is different from "you owe nothing".
+   */
+  readonly owed?: MergedNeeds | null | undefined;
 }
 
 /**
@@ -411,17 +427,59 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
  * refreshed every minute in the main process, so the numbers move while the member is three
  * systems away buying the next load.
  *
- * ★ BUT THE DEPOT READING WINS AT THE SITE ITSELF ★
+ * ★ BUT THE DEPOT READING WINS AT ANY CONSTRUCTION SITE — SQUADRON OWNER, 2026-08-23 ★
  *
  * `ColonisationConstructionDepot` fires every fifteen seconds while docked and carries the whole
  * requirement — it is seconds fresher than the hub's copy, needs no network, and works at a site
- * nobody has posted. So when the member is physically docked at their current build, the panel
- * prefers the reading coming off the pad in front of them; the hub still supplies the project's
- * TITLE and hauler count, which no heartbeat carries.
+ * nobody has posted.
+ *
+ * This used to apply only when the member was docked at their OWN current build; docked at any other
+ * site, the panel kept showing the current one, on the reasoning that "a member restocking at a
+ * different depot is still on the business of THEIR build". Asked directly which should win, the
+ * owner's answer was the dock — and they are right, because the case is not restocking. A member
+ * parked on a construction pad is about to hand cargo over to THAT site, and the one moment the
+ * overlay must not be describing a different project is while somebody is transferring to this one.
+ *
+ * The distinction that keeps the old reasoning intact is `site`: an ordinary station — a market,
+ * a carrier, anywhere cargo gets bought — has no depot heartbeat, so it is not a dock for these
+ * purposes and the chosen primary still supplies the list. Only a real construction site diverts it.
  *
  * The journal-only view stays as the fallback for a member with no current build set, docked at a
  * construction site: same behaviour this panel has always had.
  */
+/**
+ * Everything owed everywhere, for the panel's second list.
+ *
+ * ★ QUIET ON A SINGLE BUILD, DELIBERATELY ★
+ *
+ * A member on one project would get their own needs list printed twice under a heading implying it
+ * is something else. Undefined rather than an empty object for the same reason every other slice in
+ * this module distinguishes them: the renderer draws nothing at all instead of an empty section.
+ *
+ * Undefined ALSO covers "we have not asked the hub yet", which is not the same as "you owe nothing"
+ * — but here the two collapse safely, because a second list is an extra rather than a claim, and
+ * a panel that briefly omits an extra is better than one that briefly asserts a member owes nothing.
+ */
+function owedAcross(input: OverlayInput): OwedAcross | undefined {
+  const owed = input.owed ?? null;
+  if (owed === null || owed.projects <= 1 || owed.rows.length === 0) return undefined;
+
+  return {
+    /*
+     * Every row, uncapped — like the needs list above it. A silent top-N would look identical to a
+     * short list, and this is the panel somebody plans a buying run from.
+     */
+    rows: owed.rows.map((r) => ({
+      commodity: r.commodity,
+      tonnes: r.tonnes,
+      shared: r.shared,
+      wantedBy: r.wantedBy.map((w) => ({ title: w.title, tonnes: w.tonnes })),
+    })),
+    projects: owed.projects,
+    totalTonnes: owed.totalTonnes,
+  };
+}
+
 function buildPanel(input: OverlayInput): OverlayData['build'] {
   const dock = input.dock;
   const current = input.currentProject;
@@ -433,18 +491,53 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
    */
   const site = dock !== null && isFresh(dock, input.now) ? dock.site : null;
 
-  if (current !== null) {
-    // Physically at the current build, with a live depot reading: prefer it — see the header.
-    if (site !== null && dock !== null && dock.marketId === current.marketId) {
-      return {
-        ...fromDepot(dock, site, input.hold),
-        // The project's own name and crew, which the heartbeat cannot supply.
-        title: current.title,
-        haulers: current.haulers.length,
-        fromHub: false,
-      };
-    }
+  /*
+   * ★ ONE RULE, SHARED WITH THE WEBSITE ★
+   *
+   * Which project a surface is talking about is decided in `@grims/shared`, so the app and the site
+   * cannot drift on it — and so the sentence explaining the choice is written once. Identity here is
+   * the market id: the dock carries one, the current build carries one, and a site nobody has posted
+   * has no project id to compare at all.
+   */
+  const owed = owedAcross(input);
 
+  const focus = overlayFocus({
+    dockedProjectId: site !== null && dock !== null ? dock.marketId : null,
+    primaryProjectId: current?.marketId ?? null,
+    activeProjectIds: current === null ? [] : [current.marketId],
+    showAll: false,
+  });
+
+  if (focus.reason === 'docked' && dock !== null && site !== null) {
+    const isPrimary = current !== null && dock.marketId === current.marketId;
+
+    return {
+      ...fromDepot(dock, site, input.hold),
+      /*
+       * The project's own name and crew, which no heartbeat carries — and only when this site IS
+       * the member's current build. At somebody else's site the hub has told us nothing about it,
+       * and borrowing the primary's title would label the pad in front of them with the wrong
+       * project's name, which is the exact confusion this change exists to remove.
+       */
+      ...(isPrimary && current !== null
+        ? { title: current.title, haulers: current.haulers.length }
+        : {}),
+      fromHub: false,
+      /*
+       * Sent only when it earns its row. `notable` is the shared rule's own judgement — see
+       * `overlay-focus.ts`; the panel draws whatever arrives, so neither surface matches on prose.
+       */
+      ...(focus.notable ? { because: focus.because } : {}),
+      /*
+       * On BOTH paths: a member owes what they owe wherever the panel happens to be focused, and
+       * the combined list is most useful precisely when the focused project is not the one they are
+       * about to shop for.
+       */
+      ...(owed === undefined ? {} : { allProjects: owed }),
+    };
+  }
+
+  if (current !== null) {
     return {
       title: current.title,
       needs: coveredNeeds(current, input.hold)
@@ -509,12 +602,50 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
        * would understate a list somebody had just updated.
        */
       observedAt: newestObservation(current.needs),
+      /*
+       * Sent only when it earns its row. `notable` is the shared rule's own judgement — see
+       * `overlay-focus.ts`; the panel draws whatever arrives, so neither surface matches on prose.
+       */
+      ...(focus.notable ? { because: focus.because } : {}),
+      /*
+       * On BOTH paths: a member owes what they owe wherever the panel happens to be focused, and
+       * the combined list is most useful precisely when the focused project is not the one they are
+       * about to shop for.
+       */
+      ...(owed === undefined ? {} : { allProjects: owed }),
     };
   }
 
-  // No current build set: the journal-docked behaviour this panel has always had.
-  if (site === null || dock === null) return null;
-  return { ...fromDepot(dock, site, input.hold), fromHub: false };
+  /*
+   * ★ NOTHING FOCUSED — BUT POSSIBLY PLENTY OWED ★
+   *
+   * No primary set and not docked at a site. This used to be the end of it, which lost the combined
+   * list in the exact place it is most useful: standing in a commodity market with an empty hold,
+   * which is precisely where a member has neither pinned a build nor docked at one.
+   *
+   * So the panel still draws when there is something to owe. Every focused-project figure is zero
+   * and stays zero — the renderer hides progress at a zero requirement and the crew count at zero
+   * haulers, so nothing here claims a build is empty; it claims no build is in front of them, which
+   * is true.
+   */
+  if (owed !== undefined) {
+    return {
+      title: null,
+      needs: [],
+      finished: 0,
+      total: 0,
+      delivered: 0,
+      required: 0,
+      haulers: 0,
+      fromHub: false,
+      observedAt: null,
+      because: focus.because,
+      allProjects: owed,
+    };
+  }
+
+  // Nothing focused and nothing owed. The panel says so in words rather than drawing an empty grid.
+  return null;
 }
 
 /** The panel's numbers, straight off a depot heartbeat. Shared by both docked paths above. */

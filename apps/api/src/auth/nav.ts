@@ -222,6 +222,24 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.COLONY_VIEW,
   },
   {
+    href: '/colonisation/owed',
+    label: 'What you owe',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Every commodity still outstanding across the builds you have joined, added up.',
+    /*
+     * ★ SQUADRON OWNER, 2026-08-23 ★
+     *
+     * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+     *
+     * Sits with the two boards rather than after them by accident: those answer "what is the
+     * squadron building", and this answers "what do I still owe" — the question somebody has open
+     * while deciding what to fill a hold with, which is the most common reason to open this group
+     * at all.
+     */
+    requires: Permission.COLONY_VIEW,
+  },
+  {
     href: '/colonisation/ownership',
     label: 'Station ownership',
     section: 'squadron',

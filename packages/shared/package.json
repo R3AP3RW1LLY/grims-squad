@@ -162,6 +162,14 @@
     "./needs-freshness": {
       "types": "./dist/needs-freshness.d.ts",
       "default": "./dist/needs-freshness.js"
+    },
+    "./overlay-focus": {
+      "types": "./dist/overlay-focus.d.ts",
+      "default": "./dist/overlay-focus.js"
+    },
+    "./colony-all-needs": {
+      "types": "./dist/colony-all-needs.d.ts",
+      "default": "./dist/colony-all-needs.js"
     }
   },
   "scripts": {

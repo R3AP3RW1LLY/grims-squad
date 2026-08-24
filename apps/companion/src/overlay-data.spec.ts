@@ -227,14 +227,65 @@ describe('the overlay payload', () => {
     expect(build?.haulers).toBe(2);
   });
 
-  it('keeps the hub view when docked at some OTHER construction site', () => {
-    // A member restocking at a different depot is still on the business of THEIR build; the panel
-    // does not defect to whatever pad they happen to be parked on.
+  it('★ MANDATORY: docking at ANOTHER construction site shows THAT site ★', () => {
+    /*
+     * ★ THIS TEST USED TO ASSERT THE OPPOSITE — SQUADRON OWNER, 2026-08-23 ★
+     *
+     * It read "keeps the hub view when docked at some OTHER construction site", reasoning that "a
+     * member restocking at a different depot is still on the business of THEIR build".
+     *
+     * Asked directly which should win when the dock and the chosen primary disagree, the owner's
+     * answer was the dock — and the old reasoning had the case wrong. You do not restock at a
+     * construction site; there is nothing to buy there. A member parked on a construction pad is
+     * about to hand cargo over to THAT site, and describing a different project while somebody is
+     * transferring to this one is wrong exactly when it matters most.
+     */
     const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
     const { build } = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
 
+    expect(build?.fromHub, 'the pad in front of them, not the hub').toBe(false);
+    expect(build?.delivered).toBe(92_006);
+  });
+
+  it('★ MANDATORY: it does NOT borrow the primary project’s name for somebody else’s site ★', () => {
+    /*
+     * The hub has told us nothing about a site the member merely flew to. Labelling that pad with
+     * the current build's title would be the exact confusion this change exists to remove — and it
+     * would look authoritative, because the title bar is where members read the project name.
+     */
+    const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
+
+    // Read off the docked station's own name, not the hub's project.
+    expect(build?.title).toBe('Harry’s Dysfunctional Society');
+    expect(build?.haulers, 'and no crew count we did not measure').toBe(0);
+  });
+
+  it('★ MANDATORY: a diversion says so, so it does not read as a lost setting ★', () => {
+    const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
+    const diverted = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
+    expect(diverted.build?.because).toMatch(/not your primary/i);
+
+    /*
+     * And stays quiet when there is nothing to explain — a strip over a cockpit cannot afford a row
+     * telling somebody they are docked where they are docked.
+     */
+    const atOwn = buildOverlayData(input({ currentProject: currentBuild() }));
+    expect(atOwn.build?.because).toBeUndefined();
+  });
+
+  it('an ordinary station does NOT divert the panel', () => {
+    /*
+     * The half of the old reasoning that survives, and the reason `site` rather than `dock` is the
+     * test. A market, a carrier, anywhere cargo is actually bought has no depot heartbeat — so the
+     * member is still working their chosen build and the panel keeps showing it.
+     */
+    const market = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: market, currentProject: currentBuild() }));
+
     expect(build?.fromHub).toBe(true);
     expect(build?.delivered).toBe(100_000);
+    expect(build?.because, 'and nothing to explain').toBeUndefined();
   });
 
   it('falls back to the journal-docked view when no current build is set', () => {
@@ -242,6 +293,101 @@ describe('the overlay payload', () => {
     const { build } = buildOverlayData(input({ currentProject: null }));
     expect(build?.fromHub).toBe(false);
     expect(build?.delivered).toBe(92_006);
+  });
+
+  /* ---------------------------------------------- everything owed, across builds */
+
+  /**
+   * ★ SQUADRON OWNER, 2026-08-23 ★
+   *
+   * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+   *
+   * Merged by the hub with the shared rule — see `colony-all-needs.spec.ts`. What is tested here is
+   * only WHEN the panel carries it, which is the part this module decides.
+   */
+  const owed = (projects = 2) => ({
+    rows: [
+      {
+        commodity: 'Steel',
+        tonnes: 800,
+        category: 'Metals',
+        shared: projects > 1,
+        wantedBy: [
+          { projectId: 'p-1', title: 'One', tonnes: 500 },
+          ...(projects > 1 ? [{ projectId: 'p-2', title: 'Two', tonnes: 300 }] : []),
+        ],
+      },
+    ],
+    projects,
+    totalTonnes: 800,
+  });
+
+  it('★ MANDATORY: stays quiet when the member is on a single build ★', () => {
+    /*
+     * There it is the SAME list printed twice, under a heading implying it is something else — and
+     * on a strip over a cockpit every wasted row costs one somebody needed.
+     */
+    const { build } = buildOverlayData(input({ currentProject: currentBuild(), owed: owed(1) }));
+
+    expect(build?.allProjects).toBeUndefined();
+  });
+
+  it('carries the combined list on both the docked and the hub path', () => {
+    // A member owes what they owe wherever the panel happens to be focused.
+    const docked = buildOverlayData(input({ currentProject: currentBuild(), owed: owed() }));
+    expect(docked.build?.allProjects?.projects).toBe(2);
+
+    const away = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    const hub = buildOverlayData(input({ dock: away, currentProject: currentBuild(), owed: owed() }));
+    expect(hub.build?.allProjects?.projects).toBe(2);
+  });
+
+  it('★ MANDATORY: still draws with NOTHING focused — the market case ★', () => {
+    /*
+     * ★ THIS RETURNED null AND LOST THE FEATURE WHERE IT MATTERS MOST ★
+     *
+     * No primary set and not docked at a site is exactly the state of somebody standing in a
+     * commodity market with an empty hold — which is the one place a combined shopping list is the
+     * whole point. The panel had nothing to draw and drew nothing.
+     */
+    const away = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: away, currentProject: null, owed: owed() }));
+
+    expect(build, 'the panel exists').not.toBeNull();
+    expect(build?.allProjects?.rows[0]?.commodity).toBe('Steel');
+    // And claims nothing about a focused build, because there is not one.
+    expect(build?.needs).toEqual([]);
+    expect(build?.required, 'a zero requirement hides the progress bar rather than showing 0%').toBe(0);
+    expect(build?.title).toBeNull();
+  });
+
+  it('draws nothing at all when there is neither a build nor anything owed', () => {
+    const away = dockedAt({ marketId: '999999', site: null } as Partial<DockedAt>);
+    expect(buildOverlayData(input({ dock: away, currentProject: null })).build).toBeNull();
+  });
+
+  it('★ MANDATORY: absent, not empty, until the hub has answered ★', () => {
+    /*
+     * Null from the hub means "we have not asked yet" and must not render as "you owe nothing
+     * anywhere" — the same distinction this module keeps for the hold and the standing orders.
+     */
+    const { build } = buildOverlayData(input({ currentProject: currentBuild(), owed: null }));
+
+    expect(build?.allProjects).toBeUndefined();
+  });
+
+  it('keeps the split, so a hold is not filled for the wrong site', () => {
+    /*
+     * 800 t across two builds is 800 t to BUY and not 800 t to hand to either of them. Without the
+     * breakdown a member fills a hold for one site and finds half of it unwanted on arrival.
+     */
+    const { build } = buildOverlayData(input({ currentProject: currentBuild(), owed: owed() }));
+
+    expect(build?.allProjects?.rows[0]?.wantedBy).toEqual([
+      { title: 'One', tonnes: 500 },
+      { title: 'Two', tonnes: 300 },
+    ]);
+    expect(build?.allProjects?.rows[0]?.shared).toBe(true);
   });
 
   /* ------------------------------------------------------------ honest nulls */

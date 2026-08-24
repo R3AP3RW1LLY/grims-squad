@@ -215,6 +215,29 @@ function NeedRow({
 }
 
 /** Everything any panel might draw. Sent whole; each panel takes the part it needs. */
+/**
+ * One shopping list across every build the member is on.
+ *
+ * ★ THE BREAKDOWN TRAVELS WITH THE TOTAL, ON PURPOSE ★
+ *
+ * Two builds wanting 500 t of steel each is 1,000 t to BUY and not 1,000 t to deliver anywhere: the
+ * cargo splits on arrival, and that split is the member's decision. Sending only the sum would have
+ * somebody fill a hold for one site and find half of it unwanted when they land.
+ */
+export interface OwedAcross {
+  readonly rows: ReadonlyArray<{
+    readonly commodity: string;
+    /** Summed across builds. What to buy — not what to hand to any one of them. */
+    readonly tonnes: number;
+    /** True when more than one build wants it: buy in bulk, split on arrival. */
+    readonly shared: boolean;
+    /** Biggest share first, so the row leads with where most of it is going. */
+    readonly wantedBy: ReadonlyArray<{ readonly title: string; readonly tonnes: number }>;
+  }>;
+  readonly projects: number;
+  readonly totalTonnes: number;
+}
+
 export interface OverlayData {
   readonly build: {
     readonly title: string | null;
@@ -275,6 +298,31 @@ export interface OverlayData {
      * The hub has always sent `observedAt` on every need. The overlay simply dropped it.
      */
     readonly observedAt: string | null;
+    /**
+     * Why THIS project and not another.
+     *
+     * ★ SQUADRON OWNER, 2026-08-23 ★
+     *
+     * The panel follows the pad a member is docked at, and falls back to the primary they chose
+     * everywhere else. Both are right, and a panel that switches between them silently is one
+     * nobody trusts — somebody who set a primary and then sees a different project must be able to
+     * tell "you are docked at this one" from "your setting was lost".
+     *
+     * Optional so an older main process, which sends no such field, still renders everything else.
+     */
+    readonly because?: string | undefined;
+    /**
+     * Everything owed across every build the member is on.
+     *
+     * ★ SQUADRON OWNER, 2026-08-23 ★
+     *
+     * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+     *
+     * Absent — not empty — when the member is on a single build, when the hub has not answered, or
+     * when nothing is outstanding anywhere. A second list is an extra rather than a claim, so the
+     * panel simply omits the section rather than asserting anything about it.
+     */
+    readonly allProjects?: OwedAcross | undefined;
   } | null;
   /**
    * The run the member picked in the Freight Office.
@@ -688,6 +736,28 @@ function BuildPanel({
         costing a line of the list underneath — which is the part somebody reads mid-flight. The
         `title` field toggle still governs it; see `overlayHeading`.
       */}
+      {/*
+        ★ WHY THIS PROJECT — SQUADRON OWNER, 2026-08-23 ★
+
+        The panel follows the pad the member is docked at and falls back to the primary they chose
+        everywhere else. Silently switching between the two is how a member concludes the setting
+        broke, so the surprising cases say which is happening.
+
+        Only the surprising ones: `because` is absent unless the shared rule judged it worth a row,
+        because a row spent on "you are docked where you are docked" is a row off the needs list.
+      */}
+      {data.because === undefined ? null : (
+        <p
+          style={{
+            margin: '0 0 4px',
+            fontSize: '10px',
+            letterSpacing: '0.08em',
+            color: C.warn,
+          }}
+        >
+          {data.because}
+        </p>
+      )}
       {show('needs') && hidden > 0 ? (
         <p
           style={{
@@ -701,7 +771,12 @@ function BuildPanel({
           {hidden} of {total} complete
         </p>
       ) : null}
-      {show('needs') ? (
+      {/*
+        `needs.length > 0` rather than `show('needs')` alone: with nothing focused the panel still
+        draws for the combined list below, and an empty grid showing only its column headings is the
+        "empty table nobody generated" problem — indistinguishable on screen from one that failed.
+      */}
+      {show('needs') && needs.length > 0 ? (
         grouped === null ? (
           /*
            * ★ FLAT WHEN THERE IS NOTHING TO GROUP BY ★
@@ -769,6 +844,75 @@ function BuildPanel({
           </p>
         </div>
       ) : null}
+
+      {show('allProjects') && data.allProjects !== undefined ? (
+        <AllProjects owed={data.allProjects} accent={accent} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Everything owed everywhere — the list a member reads standing in a commodity market.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "SrvSurvey will then show cargo items needed only for the primary or all projects."
+ *
+ * ★ THE SHARED ROWS ARE THE POINT ★
+ *
+ * A commodity two builds want is one to buy in bulk and split on arrival, and that is the single
+ * most useful thing this list can say. It is marked rather than sorted to the top: the order that
+ * fills a hold is still biggest-first, and a member scanning for what to buy should not have to
+ * re-learn the ordering because a row happens to be shared.
+ *
+ * ★ AND THE SPLIT IS NAMED, NOT JUST COUNTED ★
+ *
+ * "1,000 t" across two builds is 1,000 t to BUY and not 1,000 t to hand to either of them. Showing
+ * the total alone would have somebody fill a hold for one site and find half of it unwanted on
+ * arrival, which is a wasted trip the panel caused.
+ */
+function AllProjects({ owed, accent }: { owed: OwedAcross; accent: string }): preact.JSX.Element {
+  return (
+    <div style={{ marginTop: '6px', borderTop: `1px solid ${C.subtle}`, paddingTop: '5px' }}>
+      <p
+        style={{
+          margin: '0 0 3px',
+          fontSize: '10px',
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+          color: C.dim,
+        }}
+      >
+        All builds · {owed.projects} projects · {owed.totalTonnes.toLocaleString()} t to buy
+      </p>
+      {owed.rows.map((row) => (
+        <div
+          key={row.commodity}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr auto',
+            gap: '6px',
+            fontSize: '0.85em',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          <span style={{ color: row.shared ? accent : C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {row.commodity}
+            {/*
+              Named, not just flagged: which builds want it is what decides how the hold splits.
+              Only on shared rows — on a single-build row the name is the heading repeated.
+            */}
+            {row.shared ? (
+              <span style={{ color: C.faint }}>
+                {' '}
+                · {row.wantedBy.map((w) => `${w.title} ${w.tonnes.toLocaleString()}`).join(' + ')}
+              </span>
+            ) : null}
+          </span>
+          <span style={{ color: C.text }}>{row.tonnes.toLocaleString()} t</span>
+        </div>
+      ))}
     </div>
   );
 }
