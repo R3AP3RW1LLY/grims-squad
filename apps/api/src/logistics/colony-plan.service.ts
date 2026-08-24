@@ -445,8 +445,17 @@ export class ColonyPlanService {
     callerId: string,
   ): Promise<ReadonlyArray<{ systemName: string; claimedAt: Date }>> {
     /*
-     * `category` first so the (category, occurred_at) index is usable — there is no index on
-     * event_type, and this runs on a page load.
+     * ★ INDEXED ON user_id, NOT ON category — MEASURED, 2026-08-24 ★
+     *
+     * This comment previously claimed the `category` filter was what kept the query off a
+     * sequential scan. EXPLAIN against production says otherwise: the planner takes
+     * `telemetry_events_user_id_occurred_at_idx` and applies category and event_type as filters
+     * on top. That is the better plan — one member's rows are far fewer than one category's — and
+     * it costs 2.62 rather than a scan of every journal event ever stored.
+     *
+     * Both filters stay: `event_type` is the actual selection, and `category` narrows the rows the
+     * filter runs over. Neither is load-bearing for the index, and it was worth measuring rather
+     * than asserting, because a wrong reason in a comment is what the next person optimises around.
      *
      * DISTINCT ON keeps the NEWEST claim per system: a system can be claimed, lost and reclaimed,
      * and the useful date is the one that still applies.

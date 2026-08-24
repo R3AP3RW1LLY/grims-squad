@@ -72,11 +72,18 @@ describe('a system claim', () => {
     expect(service, 'and queries the event').toMatch(/event_type = 'ColonisationSystemClaim'/);
   });
 
-  it('★ MANDATORY: the query can use an index ★', () => {
+  it('★ MANDATORY: the query is scoped so an index can carry it ★', () => {
     /*
-     * `telemetry_events` is indexed on (category, occurred_at) and (user_id, occurred_at). There is
-     * no index on event_type, so filtering on it ALONE would be a sequential scan of every journal
-     * event this platform has ever stored — on a page load.
+     * ★ MEASURED, NOT ASSUMED — 2026-08-24 ★
+     *
+     * `telemetry_events` is indexed on (user_id, occurred_at) and (category, occurred_at), and
+     * NOT on event_type. EXPLAIN against production shows the planner takes the user_id index and
+     * applies category and event_type as filters on top — cost 2.62, rather than a scan of every
+     * journal event this platform has ever stored, on a page load.
+     *
+     * So `user_id` is the load-bearing one. It is asserted here because dropping it — say, to
+     * widen this to the squadron — would quietly turn a cheap lookup into that scan, and nothing
+     * else in the suite would notice.
      */
     const service = read('colony-plan.service.ts');
 
