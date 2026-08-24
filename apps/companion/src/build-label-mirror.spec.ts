@@ -293,3 +293,65 @@ describe('pinning a site works on both surfaces', () => {
     }
   });
 });
+
+/**
+ * Snapshot and compare, on both surfaces.
+ *
+ * ★ SQUADRON OWNER, 2026-08-23 ★
+ *
+ * "Use the camera to snapshot panels. This allows for easily comparing differences whilst making
+ * changes to your system."
+ *
+ * The summary answers "what is this system" and cannot answer "was that an improvement", because by
+ * the time the new number is on screen the old one is gone.
+ */
+describe('snapshot and compare exists on both surfaces', () => {
+  const PANELS = [
+    ['website', 'apps/web/src/app/(hub)/colonisation/planning/[id]/snapshot-compare.tsx'],
+    ['companion', 'apps/companion/src/renderer/snapshot-compare.tsx'],
+  ] as const;
+
+  it('★ MANDATORY: both use the shared diff, not their own ★', () => {
+    for (const [what, rel] of PANELS) {
+      const src = read(rel);
+      expect(src.length, `${what} snapshot panel is readable`).toBeGreaterThan(600);
+      expect(src, `${what} uses the shared diff`).toContain('diffSnapshot');
+      expect(src, `${what} uses the shared snapshot`).toContain('takeSnapshot');
+    }
+  });
+
+  it('★ MANDATORY: both are RENDERED by their summary panel ★', () => {
+    // Anchored to line-start so a commented-out call cannot pass.
+    expect(
+      read('apps/web/src/app/(hub)/colonisation/planning/[id]/system-summary.tsx'),
+      'the website renders it',
+    ).toMatch(/^\s*<SnapshotCompare/m);
+    expect(
+      read('apps/companion/src/renderer/system-summary.tsx'),
+      'the app renders it',
+    ).toMatch(/^\s*<SnapshotCompare/m);
+  });
+
+  it('★ MANDATORY: both say in WORDS when nothing changed ★', () => {
+    /*
+     * An empty diff table and a diff table nobody generated look identical on screen, and only one
+     * of them means anything.
+     */
+    for (const [what, rel] of PANELS) {
+      expect(read(rel), `${what} says so plainly`).toContain('Nothing has changed since the snapshot');
+    }
+  });
+
+  it('neither colours a tonnage increase as a fault', () => {
+    /*
+     * MORE to haul is usually a bigger system on purpose. Colouring it red would editorialise about
+     * a decision the member has just made deliberately.
+     */
+    for (const [what, rel] of PANELS) {
+      const src = read(rel);
+      expect(src, `${what} passes null for tonnage, not a good/bad verdict`).toMatch(
+        /To haul[\s\S]{0,400}null/,
+      );
+    }
+  });
+});
