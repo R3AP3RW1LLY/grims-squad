@@ -794,16 +794,82 @@ function SiteEconomyLine({
     .sort((a, b) => b[1] - a[1]);
   const fed = economy.strongLinks.length + economy.weakLinks.length;
 
+  return <EconomyDisclosure economy={economy} ranked={ranked} fed={fed} />;
+}
+
+/**
+ * The leading economy, and — on request — why.
+ *
+ * ★ IT WAS A TOOLTIP, WHICH ON THIS SURFACE IS THE SAME AS HIDDEN — 2026-08-24 ★
+ *
+ * The whole audit was computed and sent already: every buff and nerf with its reason. All of it
+ * lived in a `title` attribute, which on a panel this size means hovering exactly the right eight
+ * characters and waiting — for the one thing that explains WHY a body ended up industrial rather
+ * than agricultural, which is the question this panel exists to answer.
+ *
+ * A disclosure instead, matching the website's exactly: closed by default because a tree of thirty
+ * bodies each showing six audit lines is unreadable, open on demand.
+ */
+function EconomyDisclosure({
+  economy,
+  ranked,
+  fed,
+}: {
+  economy: SiteEconomy;
+  ranked: ReadonlyArray<[string, number]>;
+  fed: number;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+
   return (
     <span
-      style={{ ...MONO, marginLeft: '7px', fontSize: '10px', color: C.cyan }}
-      title={
-        `${ranked.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}` +
-        `\n\n${economy.audit.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${a.economy} — ${a.reason}`).join('\n')}`
-      }
+      style={{ marginLeft: '7px', display: 'inline-flex', flexDirection: 'column', verticalAlign: 'top' }}
     >
-      {economy.leading}
-      {fed > 0 ? ` · fed by ${fed}` : ''}
+      <button
+        type="button"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        style={{
+          ...MONO,
+          background: 'none',
+          border: 0,
+          padding: 0,
+          textAlign: 'left',
+          cursor: 'pointer',
+          fontSize: '10px',
+          color: C.cyan,
+          textDecoration: 'underline dotted',
+          textUnderlineOffset: '2px',
+        }}
+      >
+        {economy.leading}
+        {fed > 0 ? ` · fed by ${fed}` : ''}
+      </button>
+
+      {open ? (
+        <span
+          style={{ ...MONO, display: 'flex', flexDirection: 'column', gap: '1px', marginTop: '3px', fontSize: '10px' }}
+        >
+          <span style={{ color: C.dim }}>
+            {ranked.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}
+          </span>
+          {/*
+            Buffs and nerfs coloured apart. A nerf is not a smaller buff — "an icy body grows
+            nothing" is the reason to stop trying to farm there, and it reads as encouragement in
+            the same colour as a bonus.
+          */}
+          {economy.audit.map((a) => (
+            <span key={`${a.economy}-${a.reason}`} style={{ color: a.delta > 0 ? C.good : C.warn }}>
+              {a.delta > 0 ? '+' : ''}
+              {a.delta} {a.economy} — {a.reason}
+            </span>
+          ))}
+          {economy.audit.length === 0 ? (
+            // Said, rather than an empty gap under an expanded row that looks like a failed load.
+            <span style={{ color: C.faint }}>Nothing about this body helps or hinders it.</span>
+          ) : null}
+        </span>
+      ) : null}
     </span>
   );
 }
