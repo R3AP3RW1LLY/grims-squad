@@ -258,6 +258,19 @@ export const JOURNAL_EVENTS = {
    */
   ColonisationConstructionDepot: 'colonisation',
   ColonisationContribution: 'colonisation',
+  /*
+   * ★ WHICH SYSTEMS ARE ACTUALLY OURS — 2026-08-24 ★
+   *
+   * The two events above are both about a construction site that already exists. Nothing recorded
+   * the moment BEFORE that: a member claiming a system. So the platform could describe every build
+   * in detail and could not answer "which systems has this squadron taken", except by inferring it
+   * from builds somebody had already started — which misses every claim nobody has built on yet,
+   * and those are exactly the ones that need planning.
+   *
+   * Same category as the rest of colonisation, so it is covered by a switch members already
+   * understand rather than arriving as a new thing to decide about.
+   */
+  ColonisationSystemClaim: 'colonisation',
 } as const;
 
 export type JournalEventName = keyof typeof JOURNAL_EVENTS;
@@ -589,6 +602,14 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
    * hold, not a market — and it is the ledger the squadron leaderboard is summed from.
    */
   ColonisationContribution: ['MarketID', 'Contributions'],
+  /*
+   * Where the claim was, and nothing else.
+   *
+   * `SystemAddress` is the id64 the rest of the platform keys systems on, and `StarSystem` is the
+   * name a member reads. No cost, no timestamp beyond the event's own, and deliberately not the
+   * market id — a claim is about a system, and a claim event carries no site.
+   */
+  ColonisationSystemClaim: ['StarSystem', 'SystemAddress'],
 };
 
 /**

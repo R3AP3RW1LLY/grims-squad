@@ -156,6 +156,19 @@ export function PlanningPage({ system }: { system?: string | undefined } = {}): 
   const [plans, setPlans] = useState<ColonyPlan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  /*
+   * Systems claimed in game with no plan yet. Empty array rather than null when the read fails:
+   * this is an extra prompt, and losing it must never cost somebody the plan board they came for.
+   */
+  const [claimed, setClaimed] = useState<
+    ReadonlyArray<{ systemName: string; claimedAt: string }>
+  >([]);
+  /*
+   * Which system the form above is pre-filled with. Starts as whatever the scout sent, and "Plan
+   * it" on a claim replaces it — so a claim and a scout hand-off take the SAME route into the form
+   * rather than a second one that could drift from it.
+   */
+  const [preset, setPreset] = useState<string | undefined>(system);
 
   const load = (): void => {
     void window.colony.plans().then((a) => {
@@ -165,6 +178,9 @@ export function PlanningPage({ system }: { system?: string | undefined } = {}): 
       } else {
         setError(a.error);
       }
+    });
+    void window.colony.claimedSystems().then((a) => {
+      if (a.ok) setClaimed(a.data.claimed);
     });
   };
 
@@ -209,8 +225,52 @@ export function PlanningPage({ system }: { system?: string | undefined } = {}): 
       )}
 
       <Section title="Start a plan">
-        <NewPlan onMade={setOpenId} system={system} />
+        <NewPlan onMade={setOpenId} system={preset} />
       </Section>
+
+      {/*
+        ★ SYSTEMS YOU TOOK AND HAVE NOT PLANNED — 2026-08-24 ★
+
+        Every colonisation event collected was about a construction site that already exists, so a
+        system somebody claimed and never built on was invisible — and those are precisely the ones
+        still waiting to be planned.
+
+        An offer, not an automatic plan: writing rows into somebody's planner because of something
+        their game did is indistinguishable from a bug when it is wrong.
+      */}
+      {claimed.length === 0 ? null : (
+        <Section title="Claimed, not yet planned">
+          <p style={{ margin: '0 0 8px', fontSize: '12px', color: C.dim }}>
+            Read from your own journal. Nothing here changes until you start one.
+          </p>
+          {claimed.map((claim) => (
+            <div
+              key={claim.systemName}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                gap: '8px',
+                padding: '5px 0',
+                borderTop: `1px solid ${C.hairline}`,
+              }}
+            >
+              <span style={{ fontSize: '13px', color: C.text }}>{claim.systemName}</span>
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: C.faint }}>
+                  claimed {new Date(claim.claimedAt).toLocaleDateString('en-GB')}
+                </span>
+                {/*
+                  Straight into the form above with the system filled in — the same route the scout
+                  already uses, so there is one way to start a plan rather than a second that drifts.
+                */}
+                <Button onClick={() => setPreset(claim.systemName)}>Plan it</Button>
+              </span>
+            </div>
+          ))}
+        </Section>
+      )}
 
       <Section title="Squadron plans">
         <PlanList

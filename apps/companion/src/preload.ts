@@ -349,6 +349,8 @@ contextBridge.exposeInMainWorld('colony', {
    * pages in colonization that the website has please! must be a mirror!"
    */
   plans: () => ipcRenderer.invoke('colonyPlans'),
+  /** Systems claimed in game with no plan yet — an offer to plan them, never an automatic plan. */
+  claimedSystems: () => ipcRenderer.invoke('colonyClaimedSystems'),
   plan: (id: string) => ipcRenderer.invoke('colonyPlan', id),
   planCreate: (body: unknown) => ipcRenderer.invoke('colonyPlanCreate', body),
   /** Slot counts read off the game. Keyed on the system and body, not the plan. */

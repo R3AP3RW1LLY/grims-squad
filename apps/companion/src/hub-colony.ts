@@ -1093,6 +1093,18 @@ export const postColonyProject = (
   hubColony(call, '/projects', { method: 'POST', body });
 
 /** Every plan the member may see, squadron and personal together. */
+/**
+ * Systems this member has claimed in game and not planned yet.
+ *
+ * Read from their own journal uploads. Before `ColonisationSystemClaim` was collected (2026-08-24)
+ * a claim nobody had built on was invisible everywhere — and those are exactly the ones still
+ * waiting to be planned.
+ */
+export const colonyClaimedSystems = (
+  call: HubCall,
+): Promise<Answer<{ claimed: Array<{ systemName: string; claimedAt: string }> }>> =>
+  hubColony(call, '/plans/claimed');
+
 export const colonyPlans = (call: HubCall): Promise<Answer<{ plans: ColonyPlan[] }>> =>
   hubColony(call, '/plans');
 
