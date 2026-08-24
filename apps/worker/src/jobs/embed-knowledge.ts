@@ -97,85 +97,121 @@ export async function embedKnowledge(
    * cadence would re-scan 448,676 rows every five minutes to find nothing.
    */
   const VECTOR_SOURCES = options.sources ?? EMBEDDED_SOURCES;
-  const pendingRows = await db.$queryRawUnsafe<Array<{ n: bigint }>>(
-    `SELECT COUNT(*)::bigint AS n
+
+  /*
+   * ★ PER SOURCE, SMALLEST QUEUE FIRST — THE STARVATION BUG, 2026-08-24 ★
+   *
+   * This counted and selected across EVERY source at once, `ORDER BY ingested_at`, defending it
+   * with: "a source that has just been ingested should not jump ahead of one that has been
+   * waiting". That is right between rows of comparable sources and catastrophically wrong the
+   * moment one source is a bulk import.
+   *
+   * What it did in production: the EDDN galaxy backfill left 884,910 rows pending from 9 August.
+   * Members' own visited systems arrived on 22 August — 73 of them — and sorted BEHIND all
+   * 884,910. At roughly 45,000 embedded a night they were about twenty nights from being reached,
+   * so "Systems our members have flown to" sat at "73 awaiting embedding" and never moved. The
+   * squadron owner noticed before any alarm did, because nothing was failing: the job ran, embedded
+   * tens of thousands of rows, and reported success every time.
+   *
+   * Counting per source and taking the SMALLEST queue first fixes the class of problem rather than
+   * this instance. A source with 73 pending drains in one pass; a source with 900,000 gets whatever
+   * budget is left, which is what it had anyway. Oldest-first is preserved WITHIN each source,
+   * which is the part of the original reasoning that was actually load-bearing.
+   */
+  const backlogs = await db.$queryRawUnsafe<Array<{ source: string; n: bigint }>>(
+    `SELECT source, COUNT(*)::bigint AS n
        FROM knowledge_items
-      WHERE source = ANY($1::text[]) AND text IS NOT NULL AND embedding IS NULL`,
+      WHERE source = ANY($1::text[]) AND text IS NOT NULL AND embedding IS NULL
+      GROUP BY source`,
     VECTOR_SOURCES,
   );
-  const pending = Number(pendingRows[0]?.n ?? 0);
+  const pending = backlogs.reduce((sum, r) => sum + Number(r.n), 0);
+
+  /*
+   * Ordered HERE rather than in the SQL, deliberately.
+   *
+   * This is the whole fix, and a rule that lives in an ORDER BY cannot be tested without a real
+   * Postgres — a fake returning rows in whatever order it likes will pass whichever direction the
+   * query asks for. Written the first time with `ORDER BY n ASC`, and reversing it to DESC did not
+   * fail a single test, because the fake was doing the sorting. Seven sources is nothing to sort.
+   */
+  const smallestFirst = [...backlogs].sort((a, b) => Number(a.n) - Number(b.n));
 
   let embedded = 0;
   let failed = 0;
 
-  while (embedded + failed < Math.min(pending, limit)) {
-    const rows = await db.$queryRawUnsafe<Array<{ id: string; text: string }>>(
-      `SELECT id, text
-         FROM knowledge_items
-        WHERE source = ANY($1::text[]) AND text IS NOT NULL AND embedding IS NULL
-        /*
-         * Oldest first. A source that has just been ingested should not jump ahead of one that has
-         * been waiting — and without an ORDER BY, a failing row could be handed back repeatedly
-         * while everything behind it starved.
-         */
-        ORDER BY ingested_at
-        LIMIT $2`,
-      VECTOR_SOURCES,
-      BATCH,
-    );
-
-    if (rows.length === 0) break;
+  for (const backlog of smallestFirst) {
+    if (embedded + failed >= limit) break;
 
     /*
-     * ★ EMBEDDED IN PARALLEL, MEASURED ON THE ACTUAL CARD ★
-     *
-     *     concurrency  1:  22/s        concurrency  8: 104/s
-     *     concurrency  4:  61/s        concurrency 16: 112/s
-     *
-     * One at a time makes the whole galaxy a six-hour job; eight makes it just over an hour.
-     * Sixteen is seven per cent faster than eight and doubles the queue depth — and the same card
-     * screens forum posts, where a member is WAITING. Eight takes nearly all the throughput and
-     * leaves the model responsive.
+     * Scoped to ONE source. A failing row still cannot livelock the loop — see the zero-vector
+     * write below, which takes the row out of the pending set rather than handing it back.
      */
-    for (let i = 0; i < rows.length; i += EMBED_CONCURRENCY) {
-      const slice = rows.slice(i, i + EMBED_CONCURRENCY);
-      const vectors = await Promise.all(slice.map((r) => embedder.embed(r.text)));
+    while (embedded + failed < limit) {
+      const rows = await db.$queryRawUnsafe<Array<{ id: string; text: string }>>(
+        `SELECT id, text
+           FROM knowledge_items
+          WHERE source = $1 AND text IS NOT NULL AND embedding IS NULL
+          -- Oldest first within the source, which is where that rule genuinely applies.
+          ORDER BY ingested_at
+          LIMIT $2`,
+        backlog.source,
+        BATCH,
+      );
 
-      for (let j = 0; j < slice.length; j += 1) {
-        const row = slice[j];
-        const vector = vectors[j];
-        if (row === undefined) continue;
+      if (rows.length === 0) break;
 
-        /*
-         * ★ A REFUSAL MARKS THE ROW, IT DOES NOT RETRY FOREVER ★
-         *
-         * Without this the loop re-selects the same failing row every pass and never advances — the
-         * classic queue livelock. A zero vector is written so the row leaves the pending set, and it
-         * is distinguishable from a real one (nothing else is all zeros) if anybody wants to find
-         * and re-embed them later.
-         */
-        if (vector === null || vector === undefined || vector.length !== EMBED_DIMS) {
-          failed += 1;
+      /*
+       * ★ EMBEDDED IN PARALLEL, MEASURED ON THE ACTUAL CARD ★
+       *
+       *     concurrency  1:  22/s        concurrency  8: 104/s
+       *     concurrency  4:  61/s        concurrency 16: 112/s
+       *
+       * One at a time makes the whole galaxy a six-hour job; eight makes it just over an hour.
+       * Sixteen is seven per cent faster than eight and doubles the queue depth — and the same card
+       * screens forum posts, where a member is WAITING. Eight takes nearly all the throughput and
+       * leaves the model responsive.
+       */
+      for (let i = 0; i < rows.length; i += EMBED_CONCURRENCY) {
+        const slice = rows.slice(i, i + EMBED_CONCURRENCY);
+        const vectors = await Promise.all(slice.map((r) => embedder.embed(r.text)));
+
+        for (let j = 0; j < slice.length; j += 1) {
+          const row = slice[j];
+          const vector = vectors[j];
+          if (row === undefined) continue;
+
+          /*
+           * ★ A REFUSAL MARKS THE ROW, IT DOES NOT RETRY FOREVER ★
+           *
+           * Without this the loop re-selects the same failing row every pass and never advances — the
+           * classic queue livelock. A zero vector is written so the row leaves the pending set, and it
+           * is distinguishable from a real one (nothing else is all zeros) if anybody wants to find
+           * and re-embed them later.
+           */
+          if (vector === null || vector === undefined || vector.length !== EMBED_DIMS) {
+            failed += 1;
+            await db.$executeRawUnsafe(
+              `UPDATE knowledge_items SET embedding = $2::vector WHERE id = $1::uuid`,
+              row.id,
+              `[${new Array(EMBED_DIMS).fill(0).join(',')}]`,
+            );
+            continue;
+          }
+
+          /*
+           * pgvector's literal format is `[1,2,3]`, bound as a parameter and cast. Prisma has no
+           * vector type, so this is raw — and it is a PARAMETER rather than interpolation even though
+           * the content is numbers we generated, because the day somebody passes text through here is
+           * the day interpolation becomes an injection.
+           */
           await db.$executeRawUnsafe(
             `UPDATE knowledge_items SET embedding = $2::vector WHERE id = $1::uuid`,
             row.id,
-            `[${new Array(EMBED_DIMS).fill(0).join(',')}]`,
+            `[${vector.join(',')}]`,
           );
-          continue;
+          embedded += 1;
         }
-
-        /*
-         * pgvector's literal format is `[1,2,3]`, bound as a parameter and cast. Prisma has no
-         * vector type, so this is raw — and it is a PARAMETER rather than interpolation even though
-         * the content is numbers we generated, because the day somebody passes text through here is
-         * the day interpolation becomes an injection.
-         */
-        await db.$executeRawUnsafe(
-          `UPDATE knowledge_items SET embedding = $2::vector WHERE id = $1::uuid`,
-          row.id,
-          `[${vector.join(',')}]`,
-        );
-        embedded += 1;
       }
     }
   }
