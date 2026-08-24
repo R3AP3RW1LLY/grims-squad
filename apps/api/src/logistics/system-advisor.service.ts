@@ -12,6 +12,14 @@ import {
 } from '@grims/shared';
 // A subpath export, like every other checker in this package — not on the root index.
 import { checkColonyPlan, type PlanReport } from '@grims/shared/colony-plan-check';
+import {
+  draftContext,
+  fixedBrief,
+  sitesForDraft,
+  type DraftMode,
+  type ExistingSite,
+} from '@grims/shared/colony-draft-mode';
+import { siteProgress } from '@grims/shared/colony-plan-progress';
 import { AiClient } from '../ai/ai.client.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 
@@ -73,6 +81,66 @@ export interface DraftedLayout {
   readonly report: PlanReport | null;
   /** Why there is no draft, when there is none. */
   readonly unavailable: string | null;
+  /**
+   * The question the member must answer before anything is drafted.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22 ★
+   *
+   * "if a system already has a partial build ask the user if they want to override it, or if they
+   * want to keep it and we work around it etc."
+   *
+   * Null when there is nothing to ask — an unplanned system, or one whose every row already exists
+   * and where neither answer would change anything. Present WITH empty steps: the drafter has not
+   * run yet, and running it first and asking afterwards would spend a model call on a layout the
+   * member may be about to reject wholesale.
+   */
+  readonly ask: {
+    readonly question: string;
+    /** What stays put whatever they answer, written for a member. Null when nothing is built. */
+    readonly fixedNote: string | null;
+    readonly fixedCount: number;
+    readonly intendedCount: number;
+  } | null;
+  /**
+   * What the draft was told it could not move, said out loud on the result too.
+   *
+   * A member who gets their existing stations back in the layout needs to know that was deliberate.
+   * Null when nothing was fixed.
+   */
+  readonly keptNote: string | null;
+}
+
+/**
+ * A draft that could not run, with every field said explicitly.
+ *
+ * Spelled out rather than spread from a partial: `exactOptionalPropertyTypes` is on, and a helper
+ * that quietly omitted `ask` would let a "no draft" answer arrive looking like a question nobody
+ * asked.
+ */
+const blocked = (why: string): DraftedLayout => ({
+  steps: [],
+  report: null,
+  unavailable: why,
+  ask: null,
+  keptNote: null,
+});
+
+/**
+ * Puts the survey's own body names onto the sites the draft must work around.
+ *
+ * The plan stores a body ID; the model reasons about "A 1 f". Falling back to the id rather than
+ * dropping the row: a fixed structure the model is not told about is one it will build on top of,
+ * and a clumsy label is far cheaper than an unbuildable layout.
+ */
+function named(
+  sites: readonly ExistingSite[],
+  bodies: ReadonlyArray<{ bodyId: number; name: string }>,
+): readonly ExistingSite[] {
+  const byId = new Map(bodies.map((b) => [b.bodyId, b.name]));
+  return sites.map((s) => ({
+    ...s,
+    bodyName: s.bodyId === null ? null : (byId.get(s.bodyId) ?? `body ${s.bodyId}`),
+  }));
 }
 
 const DRAFT_PROMPT = `You lay out a colonisation plan for a player squadron in Elite Dangerous.
@@ -195,14 +263,64 @@ export class SystemAdvisorService {
    * errors attached. It is never quietly repaired: a repaired draft hides that the model got it
    * wrong, and the next one would be trusted more than it had earned.
    */
-  async draft(systemName: string): Promise<DraftedLayout> {
+  /**
+   * Lays out a system, working around whatever is already there.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22 ★
+   *
+   * "if a system already has a partial build ask the user if they want to override it, or if they
+   * want to keep it and we work around it etc."
+   *
+   * ★ THE QUESTION IS ASKED BEFORE THE MODEL RUNS, NOT AFTER ★
+   *
+   * Drafting first and asking afterwards would spend a model call — and thirty seconds of somebody's
+   * evening — on a layout they may be about to reject wholesale. So a plan with intentions in it
+   * returns the question and no steps, and the caller comes back with an answer.
+   *
+   * ★ AND "OVERRIDE" NEVER MEANS "UNBUILD" ★
+   *
+   * See `colony-draft-mode.ts`. A site that became a project exists in the game; the drafter is told
+   * about it in both modes, because a layout that moves a standing station is one the game refuses.
+   */
+  async draft(
+    systemName: string,
+    options: { planId?: string | undefined; callerId?: string | undefined; mode?: DraftMode | undefined } = {},
+  ): Promise<DraftedLayout> {
     const name = systemName.trim();
-    if (name === '') return { steps: [], report: null, unavailable: 'Name a system.' };
+    if (name === '') return blocked('Name a system.');
 
     const { system } = await this.plans.bodies(name);
     if (system === null || system.bodies.length === 0) {
-      return { steps: [], report: null, unavailable: 'Nobody has surveyed this system yet.' };
+      return blocked('Nobody has surveyed this system yet.');
     }
+
+    /*
+     * The existing plan, when the caller named one. Read through `byId`, which resolves THEIR
+     * visibility — a draft must not disclose the contents of a plan they could not otherwise open.
+     */
+    const existing = await this.#existingSites(options.planId, options.callerId);
+    const context = draftContext(existing);
+
+    if (context.mustAsk && options.mode === undefined) {
+      return {
+        steps: [],
+        report: null,
+        unavailable: null,
+        keptNote: null,
+        ask: {
+          question: context.question ?? '',
+          fixedNote: context.fixedNote,
+          fixedCount: context.fixed.length,
+          intendedCount: context.intended.length,
+        },
+      };
+    }
+
+    /*
+     * With no answer needed, `keep` is the safe default: it changes nothing about a system with
+     * nothing planned, and on a fully-built one it is the only truthful answer anyway.
+     */
+    const kept = sitesForDraft(context, options.mode ?? 'keep');
 
     const bodies = system.bodies
       .filter((b) => !/star/i.test(b.subType ?? b.kind))
@@ -216,7 +334,7 @@ export class SystemAdvisorService {
 
     const types = await this.#buildTypes();
     if (types.length === 0) {
-      return { steps: [], report: null, unavailable: 'The build catalogue is empty.' };
+      return blocked('The build catalogue is empty.');
     }
 
     const profile = profileSystem(
@@ -249,20 +367,25 @@ export class SystemAdvisorService {
           `  ${t.id}  tier ${t.tier}  ${t.location}  ${t.tonnes} t  economy ${t.influence ?? 'none'}` +
           `  needs ${t.needsPoints} tier-${t.needsTier}  gives ${t.givesPoints} tier-${t.givesTier}`,
       ),
+      /*
+       * ★ WHAT IS ALREADY THERE, LAST AND NEAREST THE ANSWER ★
+       *
+       * A model handed a list of bodies with no note of what stands on them proposes a second
+       * station on an occupied slot — which is the single most likely way this feature produces a
+       * layout nobody can build. Empty string when nothing is fixed, and the join drops it, so an
+       * unplanned system's brief is exactly what it always was.
+       */
+      ...(kept.length === 0 ? [] : ['', fixedBrief(named(kept, bodies))]),
     ].join('\n');
 
     const answer = await this.ai.ask(DRAFT_PROMPT, [{ role: 'user', content: brief }]);
     if (answer === null) {
-      return { steps: [], report: null, unavailable: 'The assistant is not reachable at the moment.' };
+      return blocked('The assistant is not reachable at the moment.');
     }
 
     const proposed = readDraft(answer);
     if (proposed.length === 0) {
-      return {
-        steps: [],
-        report: null,
-        unavailable: 'The assistant did not return a layout that could be read.',
-      };
+      return blocked('The assistant did not return a layout that could be read.');
     }
 
     /*
@@ -312,7 +435,59 @@ export class SystemAdvisorService {
         dropped === 0
           ? null
           : `${dropped} proposed step${dropped === 1 ? '' : 's'} named a structure or a body that does not exist in this system, and ${dropped === 1 ? 'was' : 'were'} dropped.`,
+      // The question has been answered by now, or there was never one to ask.
+      ask: null,
+      /*
+       * Said on the RESULT as well as in the question. A member who gets their existing stations
+       * back in the layout needs to know that was the platform being honest about what the game
+       * will let them move, rather than the drafter having ignored them.
+       */
+      keptNote: context.fixedNote,
     };
+  }
+
+  /**
+   * The existing plan's rows, with what each one actually is.
+   *
+   * ★ READ THROUGH THE CALLER'S OWN VISIBILITY ★
+   *
+   * `byId` resolves whether this member may open this plan, and answers null when they may not. A
+   * draft must not become a side door onto the contents of a plan they could not otherwise see —
+   * the same rule the current-build route follows for projects.
+   *
+   * Empty for a caller who named no plan, which is the ordinary case: drafting a fresh system.
+   */
+  async #existingSites(
+    planId: string | undefined,
+    callerId: string | undefined,
+  ): Promise<readonly ExistingSite[]> {
+    if (planId === undefined || planId === '' || callerId === undefined) return [];
+
+    const plan = await this.plans.byId(planId, callerId);
+    if (plan === null) return [];
+
+    return plan.sites.map((s) => ({
+      id: s.id,
+      buildTypeId: s.buildTypeId,
+      bodyId: s.bodyId,
+      /*
+       * Named from the SURVEY, not from here — see `draft`, which has the body list and fills this
+       * in before the brief is written. A raw id would tell the model nothing it can reason about.
+       */
+      bodyName: null,
+      position: s.position,
+      isPrimary: s.isPrimary,
+      /*
+       * The same `siteProgress` the plan page draws its badges from, so "built" means exactly what
+       * a member already sees it meaning. A second opinion here would have the drafter working
+       * around a different set of structures than the page says are there.
+       */
+      state: siteProgress({
+        id: s.id,
+        totalTonnes: s.totalTonnes,
+        project: s.project,
+      }).state,
+    }));
   }
 
   /** The build catalogue, in the shape the checker wants. */

@@ -2375,8 +2375,15 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('colonySystemAdvice', (_e, systemName: unknown) =>
       colonySystemAdvice(hub(), typeof systemName === 'string' ? systemName : ''),
     );
-    ipcMain.handle('colonyDraftLayout', (_e, systemName: unknown) =>
-      colonyDraftLayout(hub(), typeof systemName === 'string' ? systemName : ''),
+    ipcMain.handle('colonyDraftLayout', (_e, systemName: unknown, planId: unknown, mode: unknown) =>
+      colonyDraftLayout(
+        hub(),
+        typeof systemName === 'string' ? systemName : '',
+        typeof planId === 'string' && planId !== '' ? planId : undefined,
+        // Anything that is not one of the two answers is NO answer, so the hub asks rather than
+        // silently choosing — the same narrowing the website's controller does.
+        mode === 'keep' || mode === 'override' ? mode : undefined,
+      ),
     );
     ipcMain.handle('colonyDeclarePurchase', (_e, id: unknown, body: unknown) =>
       colonyDeclarePurchase(

@@ -1145,6 +1145,26 @@ export interface DraftedLayout {
     readonly totalTonnes: number;
   } | null;
   readonly unavailable: string | null;
+  /**
+   * The question to answer before anything is drafted.
+   *
+   * Squadron owner, 2026-08-22: "if a system already has a partial build ask the user if they want
+   * to override it, or if they want to keep it and we work around it etc."
+   *
+   * Arrives WITH no steps — the drafter has not run. Optional because an older hub does not send
+   * it, and a required field would make the app fail to parse an answer it could otherwise use.
+   */
+  readonly ask?:
+    | {
+        readonly question: string;
+        readonly fixedNote: string | null;
+        readonly fixedCount: number;
+        readonly intendedCount: number;
+      }
+    | null
+    | undefined;
+  /** What the draft could not move. Null when nothing in the plan is built yet. */
+  readonly keptNote?: string | null | undefined;
 }
 
 /**
@@ -1155,8 +1175,21 @@ export interface DraftedLayout {
 export const colonyDraftLayout = (
   call: HubCall,
   systemName: string,
+  /*
+   * The plan being laid out. Without it the hub drafts the system as though it were empty, which on
+   * one somebody has already started building produces a layout the game will refuse.
+   */
+  planId?: string,
+  /** The member's answer to the override-or-keep question. Absent until they have given one. */
+  mode?: 'keep' | 'override',
 ): Promise<Answer<DraftedLayout>> =>
-  hubColony(call, `/systems/${encodeURIComponent(systemName)}/draft`, { method: 'POST', body: {} });
+  hubColony(call, `/systems/${encodeURIComponent(systemName)}/draft`, {
+    method: 'POST',
+    body: {
+      ...(planId === undefined || planId === '' ? {} : { planId }),
+      ...(mode === undefined ? {} : { mode }),
+    },
+  });
 
 export const colonyPlan = (
   call: HubCall,

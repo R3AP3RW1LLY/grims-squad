@@ -248,7 +248,7 @@ export default async function PlanPage({
             <SystemSummary plan={plan} buildTypes={buildTypes} />
             <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
             {advice !== null && advice.state === 'ok' && (
-              <SystemAdvicePanel advice={advice.data} canDraft={canEdit} />
+              <SystemAdvicePanel advice={advice.data} canDraft={canEdit} planId={plan.id} />
             )}
           </Section>
         )}
