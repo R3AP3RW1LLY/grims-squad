@@ -47,7 +47,20 @@ export type LiveEventType =
    * re-reads its count through the SITE_CONFIG-gated endpoint; everybody else's re-read is
    * refused, which costs them nothing.
    */
-  | 'suggestions';
+  | 'suggestions'
+  /*
+   * ★ A DELIVERY ANYBODY MADE — SQUADRON OWNER, 2026-08-23 ★
+   *
+   * Squadron-wide (userId null), and that is the entire point. Colonisation is a group activity:
+   * three members hauling to one site is the ordinary case, and `telemetry` is published with the
+   * uploading member's id, so under the fan-out rule in `publish` it reaches nobody but them. Every
+   * other watcher sat on stale figures until they reloaded.
+   *
+   * The event carries nothing. Watchers re-read the project through the endpoint that already
+   * decides what they may see, so a broadcast costs the worst case a re-read of a page they were
+   * already looking at.
+   */
+  | 'colony';
 
 export interface LiveEvent {
   readonly type: LiveEventType;

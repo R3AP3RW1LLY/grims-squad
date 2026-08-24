@@ -219,7 +219,17 @@ export default async function ColonyProjectPage({
         server components and keeps scroll, focus and open menus, so a busy build does not make the
         page jump under somebody reading it.
       */}
-      <LiveRefresh types={['telemetry']} />
+      {/*
+        ★ 'colony' AS WELL AS 'telemetry' — SQUADRON OWNER, 2026-08-23 ★
+
+        'telemetry' is published with the uploading member's id, so it reaches that member alone.
+        Watching somebody ELSE haul to this project showed nothing until a reload — and three
+        members on one site is the ordinary case.
+
+        'colony' is squadron-wide and fires once the delivery has actually been folded in, so every
+        watcher re-reads within a second of the cargo landing.
+      */}
+      <LiveRefresh types={['telemetry', 'colony']} />
       <PageBody wide>
         {/*
           ★ WHAT THE SITE ACTUALLY IS ★
