@@ -303,6 +303,17 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
         label: 'What you delivered',
         reveals: 'The cargo you hand over to a construction site, and which site it was.',
       },
+      {
+        event: 'ColonisationSystemClaim',
+        label: 'Systems you claim',
+        /*
+         * Said plainly, including the part a member might not want. A claim names a system they
+         * have taken and the moment they took it — which is a statement about their plans, not
+         * just their cargo, and somebody should be able to weigh that before leaving it on.
+         */
+        reveals:
+          'The name of a system you claim for colonisation, and when you claimed it. Nothing about what you intend to build there.',
+      },
     ],
   },
   {

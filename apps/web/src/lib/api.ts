@@ -3029,6 +3029,17 @@ export const getColonyPlans = (
 ): Promise<AdminRead<{ plans: ColonyPlan[] }>> =>
   getAdmin(`/v1/logistics/colony/plans?owner=${owner}`);
 
+/**
+ * Systems the reader has claimed in game and not planned yet.
+ *
+ * Read from their own journal uploads — the `ColonisationSystemClaim` event, which the platform
+ * began collecting on 2026-08-24. Before that, a claim nobody had built on was invisible here, and
+ * those are exactly the ones that still need planning.
+ */
+export const getClaimedSystems = (): Promise<
+  AdminRead<{ claimed: Array<{ systemName: string; claimedAt: string }> }>
+> => getAdmin('/v1/logistics/colony/plans/claimed');
+
 export const getColonyPlan = (
   id: string,
 ): Promise<AdminRead<{ plan: ColonyPlan; can: { edit: boolean } }>> =>

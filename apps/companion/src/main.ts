@@ -57,6 +57,7 @@ import {
   colonyUnassign,
   colonyCurrent,
   colonyOwed,
+  colonyClaimedSystems,
   colonySetCurrent,
   colonyClearCurrent,
   postColonyProject,
@@ -2545,6 +2546,7 @@ if (!app.requestSingleInstanceLock()) {
     );
 
     ipcMain.handle('colonyPlans', () => colonyPlans(hub()));
+    ipcMain.handle('colonyClaimedSystems', () => colonyClaimedSystems(hub()));
     ipcMain.handle('colonyPlan', (_e, id: unknown) =>
       asText(id) === ''
         ? { ok: false as const, error: 'No plan asked for.' }

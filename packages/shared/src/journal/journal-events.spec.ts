@@ -180,6 +180,23 @@ describe('the event allowlist', () => {
        */
       'ColonisationConstructionDepot',
       'ColonisationContribution',
+      /*
+       * ★ ADDED 2026-08-24 — WHICH SYSTEMS ARE OURS ★
+       *
+       * The two above are both about a construction site that already exists. Nothing recorded the
+       * moment before that: a member claiming a system. So the platform could describe every build
+       * in detail and could not say which systems the squadron had actually taken, except by
+       * inferring it from builds already started — which misses every claim nobody has built on,
+       * and those are exactly the ones that still need planning.
+       *
+       * In the EXISTING `colonisation` category, so a member who has switched colonisation off
+       * sends none of them. This widens what a consenting member reports, not who reports.
+       *
+       * Two fields only, `StarSystem` and `SystemAddress`. The catalogue entry says plainly that
+       * this reveals a system somebody has taken and when — a statement about their plans rather
+       * than their cargo, which is worth being able to weigh before leaving it on.
+       */
+      'ColonisationSystemClaim',
       'Died',
       'Docked',
       'FSDJump',
