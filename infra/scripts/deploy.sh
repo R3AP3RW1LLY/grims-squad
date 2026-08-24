@@ -239,10 +239,65 @@ ok "$(git -C "$REPO" log --oneline -1)"
 say "Backing up the database"
 mkdir -p /srv/grims/backups
 DUMP="/srv/grims/backups/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+
+# ★ THIS DUMP HAS ONE JOB, AND IT IS NOT "BE THE BACKUP" — 2026-08-24 ★
+#
+# backup-db.sh runs twice a day from /etc/cron.d/grims-backup: a FULL dump, encrypted, uploaded to
+# object storage, and verified by reading the object's size back out of the bucket. Thirty days of
+# retention with a floor of ten. That is the backup.
+#
+# This one exists for a much narrower case: a migration, in the next few minutes, going wrong. What
+# a migration can damage is the schema and the rows the platform's own features write — members,
+# projects, plans, claims, telemetry, roughly 600 MB of it.
+#
+# It was dumping 21 GB, and 20 GB of that was two tables:
+#
+#   market_entries    ~10 GB   re-derived continuously from the EDDN feed
+#   knowledge_items   ~10 GB   the embedding corpus, rebuilt by the nightly embed jobs
+#
+# Neither is written by a migration, and both are reproducible. Carrying them made every deploy wait
+# roughly thirteen minutes on pg_dump — which is the ENTIRE deploy time, since the images are built
+# in CI and only pulled here. It also made an ssh-attached deploy outlive its own connection, which
+# is how one deploy appeared to die halfway on 2026-08-24.
+#
+# --exclude-table-data, NOT --exclude-table: the schema of both tables is still dumped, because a
+# migration absolutely can alter those, and restoring a table's shape without its rows is a very
+# different position from having no idea what shape it was.
+SLIM_TABLES=(market_entries knowledge_items)
+
+# ★ AND IT CHECKS THAT THE REAL BACKUP IS ACTUALLY HAPPENING ★
+#
+# Slimming this dump is only safe while something else is covering those tables. If backup-db.sh
+# quietly stops — a rotated key, a full bucket, a cron file lost in a rebuild — then this would go on
+# skipping 20 GB on the strength of a backup that no longer exists, and nothing would say so.
+#
+# So it reads that job's own log. A success inside two days means the safety net is real and the
+# slim dump is fine; anything else falls back to dumping EVERYTHING, slowly, which is the behaviour
+# this deploy had before today. Failing towards the slower, safer thing is the only sensible
+# direction for a check about backups.
+BACKUP_LOG=/var/log/grims-backup.log
+SLIM_OK=false
+if [[ -r $BACKUP_LOG ]]; then
+  LAST_GOOD="$(grep -F 'confirmed in bucket' "$BACKUP_LOG" | tail -1 | awk '{print $1}')"
+  if [[ -n ${LAST_GOOD:-} ]]; then
+    LAST_EPOCH="$(date -u -d "$LAST_GOOD" +%s 2>/dev/null || echo 0)"
+    AGE=$(( $(date -u +%s) - LAST_EPOCH ))
+    (( LAST_EPOCH > 0 && AGE < 172800 )) && SLIM_OK=true
+  fi
+fi
+
+EXCLUDES=()
+if [[ $SLIM_OK == true ]]; then
+  for t in "${SLIM_TABLES[@]}"; do EXCLUDES+=(--exclude-table-data="public.$t"); done
+else
+  warn "no verified offsite backup in the last 48h — taking a FULL pre-deploy dump instead"
+fi
+
 $COMPOSE exec -T postgres pg_dump -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" \
+  "${EXCLUDES[@]}" \
   | gzip > "$DUMP"
 [[ -s $DUMP ]] || die "the dump is empty — refusing to migrate"
-ok "$(du -h "$DUMP" | cut -f1) → $DUMP"
+ok "$(du -h "$DUMP" | cut -f1) → $DUMP$([[ $SLIM_OK == true ]] && printf ' (schema-only for %s — see backup-db.sh)' "${SLIM_TABLES[*]}")"
 
 # ★ KEEP THE LAST FEW, NOT ALL OF THEM — 2026-08-10 ★
 #

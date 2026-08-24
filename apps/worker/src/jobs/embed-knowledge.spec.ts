@@ -138,3 +138,105 @@ describe('nothing to do', () => {
     expect(embed).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * ★ THE STARVATION BUG — PRODUCTION, 2026-08-24 ★
+ *
+ * The squadron owner: "it looks like these are not being embedded ... Systems our members have flown
+ * to — 73 awaiting embedding".
+ *
+ * They were right, and nothing was failing. The selection ran across every source at once, ordered
+ * by `ingested_at`, defended in a comment as "a source that has just been ingested should not jump
+ * ahead of one that has been waiting". True between comparable sources; catastrophic once one source
+ * is a bulk import.
+ *
+ * In production the EDDN galaxy backfill held 884,910 rows pending from 9 August. Members' own
+ * visited systems arrived on 22 August, 73 of them, and sorted BEHIND all 884,910 — roughly twenty
+ * nights from being reached at the observed rate. Every run reported success, because it WAS
+ * succeeding: it embedded tens of thousands of rows a night, just never those.
+ */
+function twoSourceDb(backlog: Record<string, number>) {
+  const servedBySource = new Map<string, boolean>();
+  const embeddedIds: string[] = [];
+
+  const db = {
+    $queryRawUnsafe: vi.fn(async (sql: string, ...params: unknown[]) => {
+      if (sql.includes('GROUP BY source')) {
+        /*
+         * Returned LARGEST FIRST, on purpose.
+         *
+         * A fake that helpfully sorts these is a fake that passes whichever order the code asks
+         * for — which is exactly what happened the first time these tests were written, and
+         * reversing the real ordering did not fail one of them. Handing back the worst possible
+         * order is what makes the assertion below mean something.
+         */
+        return Object.entries(backlog)
+          .map(([source, n]) => ({ source, n: BigInt(n) }))
+          .sort((a, b) => Number(b.n) - Number(a.n));
+      }
+
+      const source = String(params[0]);
+      // One page per source, then empty — which is how the inner loop terminates.
+      if (servedBySource.get(source) === true) return [];
+      servedBySource.set(source, true);
+
+      return Array.from({ length: backlog[source] ?? 0 }, (_, i) => ({
+        id: `${source}-${i}`,
+        text: `${source} row ${i}`,
+      }));
+    }),
+    $executeRawUnsafe: vi.fn(async (_sql: string, id: string) => {
+      embeddedIds.push(id);
+      return 1;
+    }),
+  } as unknown as PrismaClient;
+
+  return { db, embeddedIds };
+}
+
+describe('a small source behind a huge one', () => {
+  it('★ MANDATORY: the small queue is drained FIRST, not twenty nights later ★', () => {
+    /*
+     * The whole fix in one assertion. `companion` has 73 rows and `eddn` has hundreds of thousands;
+     * the member-facing ones must not be behind the bulk import.
+     */
+    return (async () => {
+      const { db, embeddedIds } = twoSourceDb({ eddn: 500, companion: 3 });
+
+      await embedKnowledge(db, { embed: async () => vector() }, { limit: 10 });
+
+      expect(embeddedIds.length).toBeGreaterThan(0);
+      const firstThree = embeddedIds.slice(0, 3);
+      expect(firstThree.every((id) => id.startsWith('companion-')), firstThree.join(',')).toBe(true);
+    })();
+  });
+
+  it('★ MANDATORY: counts the backlog across every source, not just the first ★', async () => {
+    /*
+     * `pending` is what decides whether the run announces itself at all. Counting one source would
+     * make a sweep that cleared a real backlog report "nothing to do" and stay silent.
+     */
+    const { db } = twoSourceDb({ eddn: 500, companion: 3 });
+
+    const r = await embedKnowledge(db, { embed: async () => vector() }, { limit: 1000 });
+
+    expect(r.pending).toBe(503);
+  });
+
+  it('still honours the overall limit across sources', async () => {
+    // The budget is shared. A small source draining first must not let the total run over.
+    const { db, embeddedIds } = twoSourceDb({ eddn: 500, companion: 3 });
+
+    await embedKnowledge(db, { embed: async () => vector() }, { limit: 4 });
+
+    expect(embeddedIds.length).toBeLessThanOrEqual(BATCH_UPPER_BOUND);
+    expect(embeddedIds.some((id) => id.startsWith('companion-'))).toBe(true);
+  });
+});
+
+/*
+ * A single page is served per source, so a run cannot exceed one page beyond its budget. The limit
+ * is checked between pages rather than between rows — deliberately, since a page is already in
+ * flight on the card by then.
+ */
+const BATCH_UPPER_BOUND = 512;
