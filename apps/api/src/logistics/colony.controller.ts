@@ -1,6 +1,5 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { PrismaClient } from '@grims/db';
 import { AppError, ErrorCode, Permission, readClaimOwnership, ROLE_PRESETS } from '@grims/shared';
 import { mergeNeeds } from '@grims/shared/colony-all-needs';
 import { Public } from '../auth/auth.guard.js';
@@ -14,6 +13,7 @@ import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { SystemAdvisorService } from './system-advisor.service.js';
+import { ColonyBlocService } from './colony-bloc.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -64,11 +64,16 @@ export class ColonyController {
     // What a system should be built as, from its survey and its bloc. Advice, never a write.
     @Inject(SystemAdvisorService) private readonly advisor: SystemAdvisorService,
     /*
-     * The bloc tables are addressed with raw SQL for the same reason every other colonisation table
-     * on this controller is: they are read and written by one feature, nothing joins to them through
-     * the ACL extension, and a generated client here would be a second shape to keep in step.
+     * Groups of our own systems, and the nexus over them.
+     *
+     * ★ THESE ROUTES USED TO HOLD THE RULES THEMSELVES ★
+     *
+     * They were four raw statements on this controller with no visibility filter and an officer-only
+     * gate — which is exactly why production held zero blocs, and why listing them would have leaked
+     * every member's system list the moment personal groups existed. `blocs_` for the same reason as
+     * `plans_`: the route method below it already owns the name.
      */
-    @Inject(PrismaClient) private readonly db: PrismaClient,
+    @Inject(ColonyBlocService) private readonly blocs_: ColonyBlocService,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -653,51 +658,117 @@ export class ColonyController {
    * and builds high tech in another and has nothing in between — which no single-system view can
    * produce. Officers decide the grouping because it changes the recommendation everybody reads.
    */
+  /**
+   * The groups this member may see.
+   *
+   * ★ THIS ROUTE USED TO RETURN EVERY BLOC IN THE TABLE ★
+   *
+   * Which was harmless while a bloc was always the squadron's, and became a leak the moment members
+   * could make their own — a bloc's system list says where somebody is quietly building, months
+   * before anything is standing there. The filtering now lives in the service, in the WHERE clause,
+   * with the same three ways a plan is gated.
+   */
   @Get('blocs')
   async blocs(@User() caller: CurrentUser | undefined) {
-    await this.#assert(caller, Permission.COLONY_VIEW, 'You do not have access to the colonisation boards.');
-
-    const rows = await this.db.$queryRawUnsafe<
-      Array<{ id: string; name: string; note: string | null; system_name: string | null; role: string | null }>
-    >(
-      `SELECT b.id::text, b.name, b.note, s.system_name, s.role
-         FROM colony_blocs b
-         LEFT JOIN colony_bloc_systems s ON s.bloc_id = b.id
-        ORDER BY b.name, s.system_name`,
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
     );
 
-    const byId = new Map<string, { id: string; name: string; note: string | null; systems: Array<{ systemName: string; role: string | null }> }>();
-    for (const r of rows) {
-      let bloc = byId.get(r.id);
-      if (bloc === undefined) {
-        bloc = { id: r.id, name: r.name, note: r.note, systems: [] };
-        byId.set(r.id, bloc);
-      }
-      if (r.system_name !== null) bloc.systems.push({ systemName: r.system_name, role: r.role });
-    }
-    return { blocs: [...byId.values()] };
+    return { blocs: await this.blocs_.list(me.userId, mask) };
   }
 
+  /** One group, with what its systems can feed each other. */
+  @Get('blocs/:id/nexus')
+  async blocNexus(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const nexus = await this.blocs_.nexus(id, me.userId, mask);
+    if (nexus === null) {
+      // The same opaque answer for "no such group" and "not yours".
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That group is not available.');
+    }
+    return nexus;
+  }
+
+  /**
+   * Makes a group.
+   *
+   * ★ NO LONGER OFFICER-ONLY, AND THAT IS THE POINT ★
+   *
+   * This route demanded COLONY_MANAGE, which is why production held zero blocs: the members who
+   * wanted to group their own systems were not allowed to. A personal group needs no permission —
+   * it is a member grouping systems they may already see. Only claiming one for the SQUADRON still
+   * needs the officer bit, and the service is what enforces that.
+   */
   @Post('blocs')
   async createBloc(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
     const me = this.#requireSession(caller);
-    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage system blocs.');
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
 
     const raw = (body ?? {}) as Record<string, unknown>;
     const name = typeof raw['name'] === 'string' ? raw['name'].trim().slice(0, 80) : '';
-    if (name === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the bloc.');
+    const note =
+      typeof raw['note'] === 'string' && raw['note'].trim() !== ''
+        ? raw['note'].trim().slice(0, 400)
+        : null;
 
-    const note = typeof raw['note'] === 'string' && raw['note'].trim() !== '' ? raw['note'].trim().slice(0, 400) : null;
-
-    const [row] = await this.db.$queryRawUnsafe<Array<{ id: string }>>(
-      `INSERT INTO colony_blocs (name, note, created_by_id) VALUES ($1, $2, $3::uuid)
-       ON CONFLICT (name) DO UPDATE SET note = EXCLUDED.note
-       RETURNING id::text`,
+    const id = await this.blocs_.create({
       name,
       note,
-      me.userId,
+      owner: raw['owner'] === 'squadron' ? 'squadron' : 'personal',
+      callerId: me.userId,
+      mask,
+    });
+
+    return { id, name };
+  }
+
+  /** Shares a personal group with the squadron to VIEW, or stops sharing it. */
+  @Patch('blocs/:id/visibility')
+  async setBlocVisibility(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
     );
-    return { id: row?.id ?? '', name };
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    await this.blocs_.setVisibility({
+      blocId: id,
+      callerId: me.userId,
+      shared: raw['shared'] === true,
+    });
+    return { ok: true };
+  }
+
+  @Delete('blocs/:id')
+  async removeBloc(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.blocs_.remove(id, me.userId, mask);
+    return { ok: true };
   }
 
   /**
@@ -715,26 +786,21 @@ export class ColonyController {
     @Body() body: unknown,
   ) {
     const me = this.#requireSession(caller);
-    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage system blocs.');
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
 
     const raw = (body ?? {}) as Record<string, unknown>;
     const systemName = typeof raw['systemName'] === 'string' ? raw['systemName'].trim().slice(0, 80) : '';
-    if (systemName === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the system.');
 
     // Narrowed to what the ranking understands. Anything else is stored as "no role decided" rather
     // than as a value the gap analysis would silently ignore.
     const known = ['extraction', 'refinery', 'industrial', 'hightech', 'agriculture', 'tourism', 'military', 'colony'];
     const role = typeof raw['role'] === 'string' && known.includes(raw['role']) ? raw['role'] : null;
 
-    await this.db.$executeRawUnsafe(
-      `INSERT INTO colony_bloc_systems (bloc_id, system_name, role, added_by_id)
-       VALUES ($1::uuid, $2, $3, $4::uuid)
-       ON CONFLICT (bloc_id, system_name) DO UPDATE SET role = EXCLUDED.role`,
-      id,
-      systemName,
-      role,
-      me.userId,
-    );
+    await this.blocs_.addSystem({ blocId: id, systemName, role, callerId: me.userId, mask });
     return { ok: true };
   }
 
@@ -744,14 +810,19 @@ export class ColonyController {
     @Param('id') id: string,
     @Param('name') name: string,
   ) {
-    this.#requireSession(caller);
-    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage system blocs.');
-
-    await this.db.$executeRawUnsafe(
-      `DELETE FROM colony_bloc_systems WHERE bloc_id = $1::uuid AND lower(system_name) = lower($2)`,
-      id,
-      decodeURIComponent(name),
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
     );
+
+    await this.blocs_.removeSystem({
+      blocId: id,
+      systemName: decodeURIComponent(name),
+      callerId: me.userId,
+      mask,
+    });
     return { ok: true };
   }
 
