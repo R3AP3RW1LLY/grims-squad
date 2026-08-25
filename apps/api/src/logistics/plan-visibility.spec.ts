@@ -43,14 +43,25 @@ describe('who may see a plan', () => {
      * The board and the detail. A plan visible on the list and refused when opened would be the
      * worst of both — and two predicates that must agree are two predicates that will eventually
      * not, which is why this counts them rather than trusting a reading.
+     *
+     * ★ A THIRD PATH ARRIVED ON 2026-08-25, AND THIS TEST IS WHY IT IS GATED ★
+     *
+     * `predictedTradeFor` reads plans on behalf of the NEXUS: a member groups several systems and
+     * asks what they can feed each other. The systems in a group are named by the member, so a
+     * group can perfectly well name a system whose only plan belongs to somebody else and is
+     * private — and reading it would leak that member's plan through a group they do not know
+     * exists.
+     *
+     * The count going 2 → 3 is the whole value of this test. It failed the moment the method was
+     * written, which is precisely when the question needed asking.
      */
     const service = read(SERVICE);
 
     const gates = service.match(/OR p\.visibility = 'squadron'/g) ?? [];
-    expect(gates.length, 'both the list and the detail').toBe(2);
+    expect(gates.length, 'the list, the detail, and the nexus').toBe(3);
 
     const ownGates = service.match(/OR p\.posted_by_id = \$2::uuid/g) ?? [];
-    expect(ownGates.length, 'and each still lets the author see their own').toBe(2);
+    expect(ownGates.length, 'and each still lets the author see their own').toBe(3);
   });
 
   it('★ MANDATORY: sharing does NOT confer editing ★', () => {

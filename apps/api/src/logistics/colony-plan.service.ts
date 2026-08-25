@@ -26,6 +26,7 @@ import { siteProgress } from '@grims/shared/colony-plan-progress';
 import {
   selfSufficiency,
   systemTrade,
+  type PredictedLists,
   type SelfSufficiency,
   type SystemTrade,
 } from '@grims/shared';
@@ -967,6 +968,75 @@ export class ColonyPlanService {
       selfSufficiency: selfSufficiency(trade.sells, needs),
       prices,
     };
+  }
+
+  /**
+   * What the plans for these systems expect them to trade, once built.
+   *
+   * ★ THE NEXUS'S PREDICTED HALF, AND IT REUSES THIS PIPELINE ON PURPOSE ★
+   *
+   * Resolving a system's market is four steps — sites, bodies, economies, then `predictMarket` per
+   * site — and every one of them is already private to this service. A bloc that reimplemented them
+   * would be a second economy model that agreed with this one until the day somebody fixed a bug in
+   * only one of the two.
+   *
+   * ★ VISIBILITY IS ENFORCED HERE, NOT BY THE CALLER ★
+   *
+   * A bloc may name a system whose only plan belongs to somebody else and is private. Reading it
+   * would leak that member's plan through a group they do not know exists — so the same three-way
+   * predicate every other read on this service uses is written into the query, and a system whose
+   * plan is not visible simply comes back absent. The nexus then reports it as `unknown`, which is
+   * the truthful answer: WE have nothing to go on, whatever somebody else may have drawn.
+   *
+   * One plan per system, preferring the caller's own, then the squadron's, then a shared one. A
+   * member who has drawn their own plan for a system means that one when they group it.
+   */
+  async predictedTradeFor(
+    systemNames: readonly string[],
+    callerId: string,
+  ): Promise<ReadonlyMap<string, PredictedLists>> {
+    const names = [...new Set(systemNames.map((n) => n.trim()).filter((n) => n !== ''))];
+    const out = new Map<string, PredictedLists>();
+    if (names.length === 0) return out;
+
+    const plans = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT DISTINCT ON (p.system_name)
+              p.id, p.system_name, p.system_id64::text AS system_id64
+         FROM colony_plans p
+        WHERE p.system_name = ANY($1::text[])
+          AND (
+            p.owner = 'squadron'
+            OR p.posted_by_id = $2::uuid
+            OR p.visibility = 'squadron'
+          )
+        ORDER BY p.system_name,
+                 CASE
+                   WHEN p.posted_by_id = $2::uuid THEN 0
+                   WHEN p.owner = 'squadron' THEN 1
+                   ELSE 2
+                 END,
+                 p.updated_at DESC`,
+      names,
+      callerId,
+    );
+
+    for (const plan of plans) {
+      const planId = String(plan['id']);
+      const systemName = String(plan['system_name']);
+      const id64 = plan['system_id64'] === null ? null : String(plan['system_id64']);
+
+      const [bodies, sites] = await Promise.all([this.#bodiesOf(id64), this.#sitesOf(planId)]);
+      const economies = await this.#economies(sites, bodies);
+      const markets = await this.#markets(sites, economies);
+      const trade = systemTrade(markets.map((m) => ({ siteId: m.siteId, market: m.market })));
+
+      out.set(systemName, {
+        exports: trade.sells.map((l) => l.commodity),
+        imports: trade.buys.map((l) => l.commodity),
+      });
+    }
+
+    return out;
   }
 
   /**
