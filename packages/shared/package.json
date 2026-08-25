@@ -182,6 +182,10 @@
     "./raven-preview": {
       "types": "./dist/raven-preview.d.ts",
       "default": "./dist/raven-preview.js"
+    },
+    "./colony-nexus": {
+      "types": "./dist/colony-nexus.d.ts",
+      "default": "./dist/colony-nexus.js"
     }
   },
   "scripts": {
