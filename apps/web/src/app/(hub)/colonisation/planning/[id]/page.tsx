@@ -10,6 +10,7 @@ import { NoAccess, AdminUnavailable } from '../../../app/no-access';
 import { getBuildTypes, getColonyPlan, getSystemAdvice } from '../../../../../lib/api';
 import { SystemAdvicePanel } from './system-advice';
 import { RavenImport } from './raven-import';
+import { SharePlan } from './share-plan';
 import { SystemSummary } from './system-summary';
 import { CopySystem } from '../../../../../components/copy-system';
 import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
@@ -173,7 +174,26 @@ export default async function PlanPage({
         <CopySystem system={plan.systemName} />
         <span className="ml-2">· revision {plan.version}</span>
         {plan.postedBy === null ? null : <span>· started by {plan.postedBy}</span>}
+        {/*
+          ★ SAID ON THE PLAN ITSELF — 2026-08-24 ★
+
+          A member opening somebody else's shared plan needs to know that is what it is, or the
+          read-only controls read as a bug. And an author needs to see, without hunting for a
+          toggle, that this one is currently readable by the squadron.
+        */}
+        {plan.owner === 'personal' && plan.visibility === 'squadron' && (
+          <span className="text-[var(--color-text-primary)]">· shared with the squadron</span>
+        )}
       </p>
+
+      {/*
+        Only on your OWN personal plan. The service refuses anybody else, so this is a rendering
+        decision rather than the rule — but offering a control that will be refused is how somebody
+        concludes the app is broken. A squadron plan has nothing to share: every member sees it.
+      */}
+      {canEdit && plan.owner === 'personal' && (
+        <SharePlan planId={plan.id} shared={plan.visibility === 'squadron'} />
+      )}
 
       <PageBody wide>
         <StatGrid>

@@ -1402,6 +1402,27 @@ export class ColonyDeviceController {
   }
 
   /**
+   * Sharing a plan, from the app. Same service and same rule as the website's door: only the author
+   * may share their own plan, and a squadron plan is refused because it is already visible.
+   */
+  @Public()
+  @Patch('plans/:id/visibility')
+  async setPlanVisibility(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { shared?: boolean } = {},
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.plans_.setVisibility({ planId: id, callerId: me.userId, shared: body.shared === true });
+    return { ok: true };
+  }
+
+  /**
    * The import, for the companion. Same service and same two steps as the website's door.
    *
    * Squadron owner's standing rule: "we need all of this in full parity on the website and the

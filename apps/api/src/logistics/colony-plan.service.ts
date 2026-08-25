@@ -128,6 +128,13 @@ export interface PlanSite {
 export interface PlanDetail {
   readonly id: string;
   readonly owner: 'squadron' | 'personal';
+  /**
+   * Who may SEE it. `owner` still decides who may EDIT, and this change does not touch that.
+   *
+   * `squadron` on a personal plan means the author has shared it: any member may read it and haul
+   * to the projects it spawned, and only the author may change it.
+   */
+  readonly visibility: 'private' | 'squadron';
   readonly title: string;
   readonly systemName: string;
   readonly systemId64: string | null;
@@ -510,7 +517,7 @@ export class ColonyPlanService {
 
   async list(owner: 'squadron' | 'personal' | 'all', callerId: string): Promise<readonly PlanDetail[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.system_id64::text AS system_id64,
+      `SELECT p.id, p.owner::text AS owner, p.visibility::text AS visibility, p.title, p.system_name, p.system_id64::text AS system_id64,
               p.notes, p.version, p.posted_by_id, p.updated_at, u.display_name AS posted_by,
               s.fetched_at,
               /*
@@ -537,9 +544,26 @@ export class ColonyPlanService {
          JOIN users u ON u.id = p.posted_by_id
          LEFT JOIN colony_systems s ON s.id64 = p.system_id64
         WHERE ($1 = 'all' OR p.owner::text = $1)
-          -- A personal plan is its author's alone until they choose otherwise; a squadron plan is
-          -- everybody's. There is no third state, so there is no visibility column to read.
-          AND (p.owner = 'squadron' OR p.posted_by_id = $2::uuid)
+          -- ★ THREE WAYS TO SEE A PLAN — 2026-08-24 ★
+          --
+          -- This comment used to end "There is no third state, so there is no visibility column to
+          -- read." There is now: the squadron owner asked for plans a member can share for the
+          -- squadron to VIEW without handing over ownership.
+          --
+          -- A squadron plan is everybody's. Your own is yours whatever its visibility. And a
+          -- personal plan its author has shared is readable by any member -- read-only, which is
+          -- enforced by mayEdit being deliberately untouched by this change: ownership still
+          -- decides editing, and this column only decides seeing.
+          --
+          -- No backticks anywhere in this string. It lives inside a TS template literal, so one
+          -- around an identifier ends the literal and the parser reports the error lines away from
+          -- the cause. Sixth time in this repo; the note is here because the fix is not obvious
+          -- from where the error points.
+          AND (
+            p.owner = 'squadron'
+            OR p.posted_by_id = $2::uuid
+            OR p.visibility = 'squadron'
+          )
         ORDER BY p.updated_at DESC`,
       owner,
       callerId,
@@ -838,13 +862,21 @@ export class ColonyPlanService {
 
   async byId(id: string, callerId: string): Promise<PlanDetail | null> {
     const [row] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.system_id64::text AS system_id64,
+      `SELECT p.id, p.owner::text AS owner, p.visibility::text AS visibility, p.title, p.system_name, p.system_id64::text AS system_id64,
               p.notes, p.version, p.posted_by_id, p.updated_at, u.display_name AS posted_by,
               s.fetched_at
          FROM colony_plans p
          JOIN users u ON u.id = p.posted_by_id
          LEFT JOIN colony_systems s ON s.id64 = p.system_id64
-        WHERE p.id = $1::uuid AND (p.owner = 'squadron' OR p.posted_by_id = $2::uuid)`,
+        WHERE p.id = $1::uuid
+          AND (
+            -- The same three ways as the board above. A plan you can see on the list and cannot
+            -- open would be the worst of both, and two predicates that must agree are two
+            -- predicates that will eventually not.
+            p.owner = 'squadron'
+            OR p.posted_by_id = $2::uuid
+            OR p.visibility = 'squadron'
+          )`,
       id,
       callerId,
     );
@@ -1308,6 +1340,22 @@ export class ColonyPlanService {
     return {
       id: String(r['id']),
       owner: r['owner'] === 'squadron' ? 'squadron' : 'personal',
+      /*
+       * ★ SHARED IS A VISIBILITY, NOT AN OWNER — 2026-08-24 ★
+       *
+       * Squadron owner: plans a member can make "available for the entire squadron to view without
+       * it being a squadron plan".
+       *
+       * Surfaces need this to bucket correctly. Without it another member's shared plan arrives as
+       * `owner: 'personal'` and lands under "Your plans", which is both wrong and alarming — it
+       * reads as somebody else's work having been filed as yours.
+       *
+       * Squadron plans report `squadron` regardless of the column, because that is what they are:
+       * the field is ignored for them, and reporting a stored `private` would invite a surface to
+       * hide a plan every member is meant to see.
+       */
+      visibility:
+        r['owner'] === 'squadron' ? 'squadron' : r['visibility'] === 'squadron' ? 'squadron' : 'private',
       title: String(r['title']),
       systemName: String(r['system_name']),
       systemId64: r['system_id64'] === null ? null : String(r['system_id64']),
@@ -1417,6 +1465,60 @@ export class ColonyPlanService {
    * So the answer is computed HERE, from the same predicate the refusal uses, and sent to both
    * surfaces. A rendering hint that disagrees with the rule it is hinting at is not a hint.
    */
+  /**
+   * Shares a personal plan with the squadron, or takes it back.
+   *
+   * ★ SQUADRON OWNER, 2026-08-24 ★
+   *
+   * "we want to add a feature that allows users to make their plans available for the entire
+   * squadron to view without it being a squadron plan etc." Read-only, but haulable.
+   *
+   * ★ THE AUTHOR, AND ONLY THE AUTHOR ★
+   *
+   * Not officers — deliberately, and not for symmetry with editing. Sharing is a decision about
+   * somebody's own unfinished work; an officer able to publish a member's private plan could expose
+   * something half-thought-through that its author was not ready to show, and there is no way to
+   * un-see it afterwards. COLONY_MANAGE is the right to direct the squadron's builds, not the right
+   * to publish other people's drafts.
+   *
+   * ★ AND NOT ON A SQUADRON PLAN ★
+   *
+   * Those are visible to every member by definition, so the column means nothing on them. Refused
+   * rather than silently ignored: a control that appears to work and changes nothing is worse than
+   * one that says why it cannot.
+   */
+  async setVisibility(input: {
+    planId: string;
+    callerId: string;
+    shared: boolean;
+  }): Promise<void> {
+    const [plan] = await this.db.$queryRawUnsafe<Array<{ owner: string; posted_by_id: string }>>(
+      `SELECT owner::text AS owner, posted_by_id FROM colony_plans WHERE id = $1::uuid`,
+      input.planId,
+    );
+
+    /*
+     * The same opaque answer for "no such plan" and "not yours", so a caller learns only that they
+     * cannot have it — the rule every other route on this service follows.
+     */
+    if (plan === undefined || plan.posted_by_id !== input.callerId) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'We hold no such plan of yours.');
+    }
+
+    if (plan.owner === 'squadron') {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'A squadron plan is already visible to every member.',
+      );
+    }
+
+    await this.db.$executeRawUnsafe(
+      `UPDATE colony_plans SET visibility = $2::"ColonyVisibility" WHERE id = $1::uuid`,
+      input.planId,
+      input.shared ? 'squadron' : 'private',
+    );
+  }
+
   async mayEdit(planId: string, callerId: string, mask: bigint): Promise<boolean> {
     const [plan] = await this.db.$queryRawUnsafe<Array<{ owner: string; posted_by_id: string }>>(
       `SELECT owner::text AS owner, posted_by_id FROM colony_plans WHERE id = $1::uuid`,

@@ -1,6 +1,7 @@
 import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
 import { PinnedSite } from './pinned-site.js';
 import { RavenImport } from './raven-import.js';
+import { SharePlan } from './share-plan.js';
 import { SystemSummary } from './system-summary.js';
 import { slotWarnings } from '@grims/shared/colony-slots';
 import { buildTypeLabel, siteBuildLabel } from '@grims/shared/colony-build-label';
@@ -705,6 +706,21 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
         to the number immediately above it.
       */}
       <RavenImport planId={plan.id} canEdit={canEdit} onApplied={load} />
+
+      {/*
+        ★ SHARING, ON YOUR OWN PLAN ONLY — SQUADRON OWNER, 2026-08-24 ★
+
+        "available for the entire squadron to view without it being a squadron plan." Read-only for
+        everybody else, and the hub refuses anyone but the author — so this is a rendering decision,
+        not the rule. A squadron plan has nothing to share: every member already sees it.
+      */}
+      {canEdit && plan.owner === 'personal' ? (
+        <SharePlan
+          planId={plan.id}
+          shared={plan.visibility === 'squadron'}
+          onChanged={load}
+        />
+      ) : null}
 
       {/*
         ★ WHERE THE BODIES CAME FROM, AND WHEN ★

@@ -241,6 +241,8 @@ declare global {
         file: string,
       ): Promise<Answer<{ preview: RavenPreview; system: string }>>;
       planImportApply(id: string, file: string): Promise<Answer<{ slotsWritten: number }>>;
+      /** Share a personal plan with the squadron, or take it back. Author only; the hub enforces. */
+      planSetVisibility(id: string, shared: boolean): Promise<Answer<{ ok: true }>>;
       planAddSite(
         id: string,
         body: {
