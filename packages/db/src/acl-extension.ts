@@ -116,6 +116,27 @@ export const ACL_MODELS = {
    */
   ColonyPlan: 'visibility',
   /*
+   * Colonisation BLOCS — groups of our own systems — from 2026-08-25.
+   *
+   * ★ THE COLUMN AND THE REGISTRATION ARRIVED IN THE SAME CHANGE ★
+   *
+   * The model is old and had no ACL at all: only officers could make a bloc, and every bloc was the
+   * squadron's. The nexus changes that — a member groups THEIR systems to see what those systems can
+   * feed each other — so `owner` and `visibility` arrive, and with them a model whose reads would be
+   * unfiltered at this layer.
+   *
+   * ★ WHAT A BLOC LEAKS IS NOT THE BLOC ★
+   *
+   * A bloc is a name and a list of system names, which sounds harmless until you notice that the
+   * list IS the disclosure: it says where a member is quietly building, months before anything is
+   * standing there. In this game that is the information people most want kept — a contested system
+   * is contested precisely because somebody found out early.
+   *
+   * Same two columns as ColonyPlan, answering the same two questions, because the squadron owner
+   * asked for member-owned groups to work the way shared plans do.
+   */
+  ColonyBloc: 'visibility',
+  /*
    * ForumThread carries no ACL COLUMN of its own — it inherits its category's, and
    * is listed here because two things now modify that inheritance in both
    * directions:
@@ -298,6 +319,45 @@ function predicateFor(model: AclModel, p: AclPrincipal): object {
         or.push({ submittedById: p.userId });
       }
       return { OR: or };
+    }
+    case 'ColonyBloc': {
+      /*
+       * ★ THE SAME SHAPE AS ColonyPlan, AND THAT IS DELIBERATE ★
+       *
+       * Squadron owner, 2026-08-25: member-owned groups should work the way shared plans do. So the
+       * rule is identical — `owner` decides editing, `visibility` decides seeing — and the predicate
+       * is identical too, on `createdById` rather than `postedById`.
+       *
+       * ★ NO ANONYMOUS READ, EVER ★
+       *
+       * A bloc has no share link and never becomes `public`. The OR list therefore starts EMPTY: a
+       * signed-out reader matches nothing. That matters more here than it does for plans, because a
+       * bloc's system list is a map of where a member is building before anything is visible in the
+       * game — the one thing worth keeping quiet while it is still only a plan.
+       *
+       * ★ SQUADRON BLOCS IGNORE visibility, AND MUST ★
+       *
+       * The column defaults to `private` and nothing backfilled the existing rows, so reading
+       * `visibility` alone would hide the squadron's own blocs from every member. `owner` is tested
+       * in its own right for exactly that reason. (There were no rows to backfill — production held
+       * zero blocs when this shipped — but a predicate that only works on an empty table is not a
+       * predicate.)
+       */
+      if (p.userId === null) {
+        // Fail closed. No anonymous route reads a bloc today; this is what stays true when one does.
+        return { id: { in: [] } };
+      }
+
+      return {
+        OR: [
+          // Every signed-in member sees the squadron's blocs, whatever the column says.
+          { owner: 'squadron' },
+          // Your own, whatever its visibility.
+          { createdById: p.userId },
+          // And a personal bloc its creator has chosen to share.
+          { visibility: 'squadron' },
+        ],
+      };
     }
     case 'ColonyPlan': {
       /*
