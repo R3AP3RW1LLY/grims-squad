@@ -216,6 +216,14 @@ describe('registration completeness', () => {
      */
     expect(Object.keys(ACL_MODELS).sort()).toEqual([
       /*
+       * Colonisation BLOCS, 2026-08-25. Groups of our own systems, for the nexus. The model predates
+       * the ACL: blocs used to be officer-made and squadron-owned, so there was nothing to filter.
+       *
+       * What a bloc discloses is its SYSTEM LIST — where a member is quietly building, long before
+       * anything is standing there — which is why it is `private` by default and never `public`.
+       */
+      'ColonyBloc',
+      /*
        * Colonisation PLANS, 2026-08-24. The squadron owner asked for plans a member can share with
        * the squadron to VIEW "without it being a squadron plan" — read-only, and only the author
        * may share.

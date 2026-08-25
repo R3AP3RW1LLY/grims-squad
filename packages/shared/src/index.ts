@@ -145,6 +145,18 @@ export type {
   PredictedMarket,
 } from './colony-market.js';
 
+/*
+ * The nexus: what a group of our own systems can feed each other.
+ *
+ * `colony-nexus.ts` shipped without an entry here, which made the whole rule unreachable from the
+ * API and the companion — the sixth time in this project a finished piece of work turned out to
+ * have no way in. Exported with the code that first needed it.
+ */
+export { nexusTrade, describeNexus } from './colony-nexus.js';
+export type { NexusBasis, NexusSystem, NexusLink, NexusReport } from './colony-nexus.js';
+export { systemMarket } from './colony-nexus-market.js';
+export type { MeasuredRow, PredictedLists } from './colony-nexus-market.js';
+
 export { NonceService, formatNonce, NONCE_TTL_MS } from './nonce.service.js';
 export type { NonceStore, NonceClaim, CheckResult, CheckOutcome } from './nonce.service.js';
 
