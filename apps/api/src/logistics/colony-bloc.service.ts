@@ -231,8 +231,14 @@ export class ColonyBlocService {
     mask: bigint;
   }): Promise<void> {
     await this.#mayEdit(input.blocId, input.callerId, input.mask);
+    /*
+     * Case-insensitive, as the route it replaces was. System names reach us from a URL, a journal
+     * and a member's typing, and those three do not agree on case — a member who cannot remove
+     * "col 285 sector gl-w c2-12" because the row says "Col 285 Sector GL-W c2-12" would be stuck
+     * with no way to tell why.
+     */
     await this.db.$executeRawUnsafe(
-      `DELETE FROM colony_bloc_systems WHERE bloc_id = $1::uuid AND system_name = $2`,
+      `DELETE FROM colony_bloc_systems WHERE bloc_id = $1::uuid AND lower(system_name) = lower($2)`,
       input.blocId,
       input.systemName.trim(),
     );

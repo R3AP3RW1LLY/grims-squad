@@ -15,6 +15,7 @@ import { ColonyCarrierService } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { SystemAdvisorService } from './system-advisor.service.js';
+import { ColonyBlocService } from './colony-bloc.service.js';
 import { AiClient, aiConfigFrom } from '../ai/ai.client.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
@@ -170,6 +171,18 @@ import type { LiveService } from '../live/live.service.js';
       inject: [PrismaClient, MARKET_STORE],
       useFactory: (db: PrismaClient, market: MarketStore) =>
         new ColonyCatalogueService(db, market),
+    },
+    {
+      /*
+       * Groups of our own systems, and the nexus over them.
+       *
+       * Takes the PLAN service rather than reaching for `colony_plans` itself: a group is a list of
+       * system names typed by a member, so it can name a system whose only plan belongs to somebody
+       * else and is private. Visibility is that service's rule, and a join here would bypass it.
+       */
+      provide: ColonyBlocService,
+      inject: [PrismaClient, ColonyPlanService],
+      useFactory: (db: PrismaClient, plans: ColonyPlanService) => new ColonyBlocService(db, plans),
     },
     {
       provide: ColonyService,

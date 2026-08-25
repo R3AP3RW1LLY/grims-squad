@@ -24,6 +24,7 @@ import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService, carrierCover, carrierHoldLines } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { SystemAdvisorService } from './system-advisor.service.js';
+import { ColonyBlocService } from './colony-bloc.service.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -73,6 +74,9 @@ export class ColonyDeviceController {
     @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
     // What a system should be built as. The same instance the website's controller uses.
     @Inject(SystemAdvisorService) private readonly advisor: SystemAdvisorService,
+    // Groups of our own systems, and the nexus over them. The same service the website uses, so the
+    // two surfaces cannot disagree about who may see a group.
+    @Inject(ColonyBlocService) private readonly blocs_: ColonyBlocService,
     /*
      * Where the caller was last seen.
      *
@@ -1308,6 +1312,156 @@ export class ColonyDeviceController {
 
     const scope = owner === 'squadron' || owner === 'personal' ? owner : 'all';
     return { plans: await this.plans_.list(scope, me.userId) };
+  }
+
+  /**
+   * Groups of our own systems, in the app.
+   *
+   * ★ FULL PARITY, WHICH IS THE SQUADRON OWNER'S STANDING RULE ★
+   *
+   * The nexus answers a question a member has while FLYING — "is there anything in my own systems
+   * that wants what this one makes" — so the app is arguably where it belongs most. A feature that
+   * existed only on the website would be one more thing a member has to alt-tab for.
+   */
+  @Public()
+  @Get('blocs')
+  async blocs(@Req() req: FastifyRequest) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const mask = await this.permissions.effectiveMask(me.userId);
+    return { blocs: await this.blocs_.list(me.userId, mask) };
+  }
+
+  @Public()
+  @Get('blocs/:id/nexus')
+  async blocNexus(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const mask = await this.permissions.effectiveMask(me.userId);
+    const nexus = await this.blocs_.nexus(id, me.userId, mask);
+    if (nexus === null) {
+      // The same opaque answer the website gives for "no such group" and "not yours".
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That group is not available.');
+    }
+    return nexus;
+  }
+
+  @Public()
+  @Post('blocs')
+  async createBloc(@Req() req: FastifyRequest, @Body() body: unknown) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    const id = await this.blocs_.create({
+      name: typeof raw['name'] === 'string' ? raw['name'].trim().slice(0, 80) : '',
+      note:
+        typeof raw['note'] === 'string' && raw['note'].trim() !== ''
+          ? raw['note'].trim().slice(0, 400)
+          : null,
+      owner: raw['owner'] === 'squadron' ? 'squadron' : 'personal',
+      callerId: me.userId,
+      mask,
+    });
+
+    return { id };
+  }
+
+  @Public()
+  @Post('blocs/:id/systems')
+  async addBlocSystem(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: unknown) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    // The same narrow list the website uses: anything else is "no role decided" rather than a value
+    // the gap analysis would silently ignore.
+    const known = ['extraction', 'refinery', 'industrial', 'hightech', 'agriculture', 'tourism', 'military', 'colony'];
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    await this.blocs_.addSystem({
+      blocId: id,
+      systemName: typeof raw['systemName'] === 'string' ? raw['systemName'].trim().slice(0, 80) : '',
+      role: typeof raw['role'] === 'string' && known.includes(raw['role']) ? raw['role'] : null,
+      callerId: me.userId,
+      mask,
+    });
+    return { ok: true };
+  }
+
+  @Public()
+  @Delete('blocs/:id/systems/:name')
+  async removeBlocSystem(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Param('name') name: string,
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const mask = await this.permissions.effectiveMask(me.userId);
+    await this.blocs_.removeSystem({
+      blocId: id,
+      systemName: decodeURIComponent(name),
+      callerId: me.userId,
+      mask,
+    });
+    return { ok: true };
+  }
+
+  @Public()
+  @Patch('blocs/:id/visibility')
+  async setBlocVisibility(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    await this.blocs_.setVisibility({
+      blocId: id,
+      callerId: me.userId,
+      shared: raw['shared'] === true,
+    });
+    return { ok: true };
+  }
+
+  @Public()
+  @Delete('blocs/:id')
+  async removeBloc(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const mask = await this.permissions.effectiveMask(me.userId);
+    await this.blocs_.remove(id, me.userId, mask);
+    return { ok: true };
   }
 
   /**
