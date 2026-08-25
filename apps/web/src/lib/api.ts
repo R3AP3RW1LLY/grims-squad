@@ -3052,6 +3052,69 @@ export const getColonyPlan = (
 ): Promise<AdminRead<{ plan: ColonyPlan; can: { edit: boolean } }>> =>
   getAdmin(`/v1/logistics/colony/plans/${encodeURIComponent(id)}`);
 
+/**
+ * A group of our own systems.
+ *
+ * ★ SQUADRON OWNER, 2026-08-24 ★
+ *
+ * "a way to allow members who have multiple systems in their colonization to create a nexus that
+ * will predict trade routes."
+ *
+ * `owner` decides who may EDIT and `visibility` who may SEE — the same pair, meaning the same two
+ * things, as a plan. `mayEdit` is computed by the API rather than re-derived here: the app drew
+ * every editing control unconditionally once before, and offered a member a full editor whose every
+ * click was refused.
+ */
+export interface ColonyBloc {
+  id: string;
+  name: string;
+  owner: 'squadron' | 'personal';
+  visibility: 'private' | 'squadron';
+  note: string | null;
+  createdById: string;
+  createdBy: string;
+  systems: string[];
+  mayEdit: boolean;
+}
+
+/** One system feeding another. */
+export interface NexusLink {
+  commodity: string;
+  from: string;
+  to: string;
+  /**
+   * Whether this route can be flown TODAY.
+   *
+   * True only when both ends are real, standing stations. Drawing a predicted route the same way as
+   * a real one would send somebody to a station that does not exist — a wasted trip measured in
+   * hours, and the most expensive way this feature could be wrong.
+   */
+  flyableNow: boolean;
+}
+
+export interface ColonyBlocNexus extends ColonyBloc {
+  report: {
+    links: NexusLink[];
+    /** Wanted by somebody here, produced by nobody here. A permanent haul from outside. */
+    gaps: Array<{ commodity: string; wantedBy: string[] }>;
+    /** Produced with no buyer here — what the group sells outward. Not a fault. */
+    surplus: Array<{ commodity: string; soldBy: string[] }>;
+    /** In the group, with nothing built and nothing planned. Named rather than dropped. */
+    unplanned: string[];
+    systems: number;
+  };
+  /** The report in a member's words, gaps first. */
+  summary: string[];
+  /** Per system, so each can be badged honestly rather than under one caption. */
+  bases: Array<{ systemName: string; basis: 'measured' | 'predicted' | 'unknown' }>;
+}
+
+export const getColonyBlocs = (): Promise<AdminRead<{ blocs: ColonyBloc[] }>> =>
+  getAdmin('/v1/logistics/colony/blocs');
+
+export const getColonyBlocNexus = (id: string): Promise<AdminRead<ColonyBlocNexus>> =>
+  getAdmin(`/v1/logistics/colony/blocs/${encodeURIComponent(id)}/nexus`);
+
 export interface SystemRoleFit {
   role: string;
   score: number;

@@ -19,6 +19,7 @@ import {
   HomeIcon,
   UsersIcon,
   RocketLaunchIcon,
+  ArrowsRightLeftIcon,
   GlobeAltIcon,
   ChatBubbleLeftRightIcon,
   ShieldCheckIcon,
@@ -143,6 +144,8 @@ const ICONS: Record<string, typeof HomeIcon> = {
   // A reticle: scouting is picking a target before anything is built.
   '/colonisation/scout': ViewfinderCircleIcon,
   '/colonisation/planning': ClipboardDocumentListIcon,
+  // Two arrows passing: the nexus is about what flies BETWEEN our systems, not about any one of them.
+  '/colonisation/nexus': ArrowsRightLeftIcon,
   '/colonisation/build-types': QueueListIcon,
   '/colonisation/squadron': BuildingOffice2Icon,
   '/colonisation/members': UserGroupIcon,
