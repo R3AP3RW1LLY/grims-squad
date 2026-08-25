@@ -215,6 +215,19 @@ describe('registration completeness', () => {
      * hand-maintained as well.
      */
     expect(Object.keys(ACL_MODELS).sort()).toEqual([
+      /*
+       * Colonisation PLANS, 2026-08-24. The squadron owner asked for plans a member can share with
+       * the squadron to VIEW "without it being a squadron plan" — read-only, and only the author
+       * may share.
+       *
+       * Two values only, `private` and `squadron`. The enum permits `public` because ColonyProject
+       * uses it for share links, but a plan is never given one; that is a rule about writes and
+       * lives in the service.
+       *
+       * Sharing never confers editing: `owner` decides that and the feature leaves `mayEdit`
+       * untouched. This entry is about who may SEE a row, which is the only thing this layer does.
+       */
+      'ColonyPlan',
       // Colonisation projects, 2026-08-02. The same three values as ShipBuild below, and the same
       // rule that `public` reads with no session — the owner chose "Squadron projects members-only,
       // personal projects publishable by choice".

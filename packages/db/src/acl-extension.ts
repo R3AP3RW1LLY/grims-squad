@@ -88,6 +88,34 @@ export const ACL_MODELS = {
    */
   ColonyProject: 'visibility',
   /*
+   * Colonisation PLANS, from 2026-08-24.
+   *
+   * ★ REGISTERED BECAUSE assertAclModelsRegistered FAILED THE BUILD ★
+   *
+   * Which is precisely what that check is for, and it earned itself here. The squadron owner asked
+   * for plans a member can share with the squadron to VIEW without giving up ownership — so the
+   * column arrived, and with it a model whose reads were suddenly unfiltered at this layer.
+   *
+   * The failure mode of getting that wrong is not a crash. It is somebody's private plan becoming
+   * readable by a member they never chose, which looks exactly like the feature working and is
+   * found by the wrong person. The service filters correctly — both read paths are pinned in
+   * `plan-visibility.spec.ts` — and this layer is what holds for the reads that do not exist yet.
+   *
+   * ★ ONLY TWO VALUES ARE EVER WRITTEN ★
+   *
+   * `private` and `squadron`. The enum permits `public` because ColonyProject uses it for share
+   * links, but a plan is never given one: the ruling was squadron-visible, and an enum permitting
+   * something is not a reason for a service to. That is a rule about WRITES and lives in the
+   * service; this layer's job is only to make sure no reader sees a row its visibility forbids,
+   * whatever put the value there.
+   *
+   * ★ VISIBILITY IS NOT OWNERSHIP ★
+   *
+   * Sharing a plan never confers editing. `owner` decides that and is deliberately untouched by the
+   * whole feature — see `mayEdit`, which does not consult this column at all.
+   */
+  ColonyPlan: 'visibility',
+  /*
    * ForumThread carries no ACL COLUMN of its own — it inherits its category's, and
    * is listed here because two things now modify that inheritance in both
    * directions:
