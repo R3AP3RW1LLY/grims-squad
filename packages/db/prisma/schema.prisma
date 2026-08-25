@@ -4681,10 +4681,29 @@ model StationOwnershipClaim {
 /// arithmetic would confidently include a system nobody thinks of as ours.
 model ColonyBloc {
   id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  /// What the squadron calls it. "Col 285 Core", not a generated label.
-  name String @unique
+  /// What it is called. "Col 285 Core", not a generated label.
+  ///
+  /// * UNIQUE PER OWNER, NOT GLOBALLY — SQUADRON OWNER, 2026-08-25 *
+  ///
+  /// It used to be `@unique` across the whole table, which was fine while only officers could make
+  /// one. Now that a member can group their own systems, a global name would mean the first person
+  /// to use "Colonia Core" takes it from everybody else — and the refusal would be about a row they
+  /// cannot see, which is the worst kind of error message.
+  name String
+  /// Squadron or personal, exactly as ColonyPlan uses it: it decides who may EDIT.
+  owner ColonyOwner @default(personal)
 
-  /// Why this grouping exists, in an officer's words. Read on the planning page.
+  /// Who may SEE it. Ignored for squadron blocs, which every member sees by definition.
+  ///
+  /// * MIRRORS PLANS DELIBERATELY *
+  ///
+  /// The owner asked for member-owned groups to work the way shared plans do, so this is the same
+  /// pair of columns answering the same two questions: `owner` decides editing, `visibility`
+  /// decides seeing. One concept members already understand, and `mayEdit` stays a question about
+  /// ownership alone.
+  visibility ColonyVisibility @default(private)
+
+  /// Why this grouping exists, in its creator's words. Read on the planning page.
   note String?
 
   createdById String   @map("created_by_id") @db.Uuid
@@ -4693,6 +4712,9 @@ model ColonyBloc {
   createdBy User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
   systems   ColonyBlocSystem[]
 
+  /// One name per owner. See the note on `name` for why this is not global.
+  @@unique([createdById, name])
+  @@index([visibility])
   @@map("colony_blocs")
 }
 
