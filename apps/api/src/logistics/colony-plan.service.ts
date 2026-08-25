@@ -258,9 +258,21 @@ export class ColonyPlanService {
    * column and is registered in ACL_MODELS — so INV-002 requires its reads to go through a bound
    * client.
    *
-   * `ColonyPlan` has no visibility column. A plan is squadron-wide or it is its author's, with no
-   * third state, and that rule is expressed directly in the WHERE clause of every read here. Taking
-   * an ACL client we did not use would suggest a protection that is not there.
+   * ★ THAT REASONING CHANGED ON 2026-08-24, AND THE DECISION SURVIVED IT ★
+   *
+   * This used to say "ColonyPlan has no visibility column ... there is no third state". There is
+   * now: the squadron owner asked for plans a member can share with the squadron to view without
+   * giving up ownership. The column exists and the model is registered in ACL_MODELS.
+   *
+   * The decision not to take a bound client still stands, but for a different reason. Every read in
+   * this service is raw SQL — which a Prisma client extension does not touch at all — so a bound
+   * client would filter exactly one query out of thirty and imply a protection the other
+   * twenty-nine do not have. The visibility rule is therefore written into each WHERE clause here,
+   * and `plan-visibility.spec.ts` counts them rather than trusting a reading.
+   *
+   * The ACL predicate in `acl-extension.ts` is not redundant: it is what holds for reads through
+   * the Prisma client, including ones nobody has written yet. Two layers, each covering what the
+   * other cannot.
    */
   constructor(
     private readonly db: PrismaClient,
@@ -498,15 +510,49 @@ export class ColonyPlanService {
     if (rows.length === 0) return [];
 
     /*
-     * Matched case-insensitively against EVERY plan for those systems, not just the caller's: a
-     * member who claimed a system an officer has already planned as a squadron build does not need
-     * telling to plan it again.
+     * Matched against plans the caller CAN SEE — case-insensitively, since a system name is typed.
+     *
+     * ★ THIS USED TO MATCH EVERY PLAN, AND THAT WAS SUBTLY WRONG — 2026-08-24 ★
+     *
+     * The original reasoning still holds for the case it was written for: a member who claimed a
+     * system an officer already planned as a squadron build does not need telling to plan it again.
+     * Squadron plans are visible to every member, so that case is unaffected.
+     *
+     * What it also did was drop a system from your list because of somebody else's PRIVATE plan —
+     * one you cannot open, cannot find, and are given no reason for. A row silently missing from a
+     * list, on the strength of something you are not allowed to know exists, is a small information
+     * leak and a worse piece of UI: there is nothing you could do to work out why.
+     *
+     * Visibility is spelled out here rather than delegated to the ACL extension. This service holds
+     * a plain client on purpose — see the note at the top of the class — and a bound client used for
+     * one query out of thirty would suggest a protection the other twenty-nine do not have.
      */
-    const planned = await this.db.colonyPlan.findMany({
-      where: { systemName: { in: rows.map((r) => r.system_name), mode: 'insensitive' } },
-      select: { systemName: true },
-    });
-    const taken = new Set(planned.map((p) => p.systemName.trim().toLowerCase()));
+    /*
+     * ★ RAW, LIKE EVERY OTHER READ HERE — 2026-08-24 ★
+     *
+     * This was the one Prisma-client read in the service, and `acl-usage.spec.ts` failed the build
+     * for it the moment ColonyPlan became an ACL-registered model: a client read of a governed model
+     * must go through a bound client, or it is simply unfiltered.
+     *
+     * A bound client for one query out of thirty was the wrong answer — it would filter this and
+     * imply a protection the twenty-nine raw reads around it do not have. Making it raw removes the
+     * exception instead, so the service is uniformly raw and the visibility rule is written where
+     * every other one on this class is written: in the WHERE clause, counted by
+     * `plan-visibility.spec.ts`.
+     *
+     * `= ANY(...)` with lower() on both sides rather than ILIKE: these are exact names, not
+     * patterns, and a system called "Col 285 Sector GL-W c2-12" contains no wildcards but would be
+     * a poor thing to hand to a matcher that treats some characters specially.
+     */
+    const planned = await this.db.$queryRawUnsafe<Array<{ system_name: string }>>(
+      `SELECT system_name
+         FROM colony_plans
+        WHERE lower(system_name) = ANY($1::text[])
+          AND (owner = 'squadron' OR posted_by_id = $2::uuid OR visibility = 'squadron')`,
+      rows.map((r) => r.system_name.trim().toLowerCase()),
+      callerId,
+    );
+    const taken = new Set(planned.map((p) => p.system_name.trim().toLowerCase()));
 
     return rows
       .filter((r) => !taken.has(r.system_name.trim().toLowerCase()))
