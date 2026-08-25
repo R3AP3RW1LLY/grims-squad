@@ -370,5 +370,8 @@ contextBridge.exposeInMainWorld('colony', {
   planRemoveSite: (id: string, siteId: string, version: number) =>
     ipcRenderer.invoke('colonyPlanRemoveSite', id, siteId, version),
   planReorder: (id: string, body: unknown) => ipcRenderer.invoke('colonyPlanReorder', id, body),
+  /** Share a personal plan with the squadron, or take it back. Author only; the hub enforces it. */
+  planSetVisibility: (id: string, shared: boolean) =>
+    ipcRenderer.invoke('colonyPlanSetVisibility', id, shared),
   planRemove: (id: string) => ipcRenderer.invoke('colonyPlanRemove', id),
 });

@@ -1096,6 +1096,33 @@ export class ColonyController {
   }
 
   /**
+   * Shares a personal plan with the squadron, or takes it back.
+   *
+   * Squadron owner, 2026-08-24: plans a member can make "available for the entire squadron to view
+   * without it being a squadron plan". Read-only for everybody else; the service enforces that only
+   * the AUTHOR may share, deliberately not officers.
+   *
+   * COLONY_VIEW is the whole bar, like declaring a current build: choosing to show your own work is
+   * not a privilege.
+   */
+  @Patch('plans/:id/visibility')
+  async setPlanVisibility(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { shared?: boolean } = {},
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.plans_.setVisibility({ planId: id, callerId: me.userId, shared: body.shared === true });
+    return { ok: true };
+  }
+
+  /**
    * What importing a Raven Colonial export would change. Writes nothing.
    *
    * ★ SQUADRON OWNER, 2026-08-24: "Import wins, and say so." ★

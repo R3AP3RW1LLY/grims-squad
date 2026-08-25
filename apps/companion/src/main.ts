@@ -24,6 +24,7 @@ import {
   addPlanSite,
   previewPlanImport,
   applyPlanImport,
+  setPlanVisibility,
   attachCarrier,
   colonyBuildTypes,
   colonyClose,
@@ -2610,6 +2611,9 @@ if (!app.requestSingleInstanceLock()) {
       });
     });
 
+    ipcMain.handle('colonyPlanSetVisibility', (_e, id: unknown, shared: unknown) =>
+      setPlanVisibility(hub(), asText(id), shared === true),
+    );
     ipcMain.handle('colonyPlanRemove', (_e, id: unknown) => removeColonyPlan(hub(), asText(id)));
 
     /*

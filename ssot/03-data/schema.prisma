@@ -2689,6 +2689,29 @@ model ColonyPlan {
   /// Squadron or personal, and it governs who may edit — the same rule projects use.
   owner ColonyOwner
 
+  /// Who may SEE a personal plan. Ignored for squadron plans, which every member sees by definition.
+  ///
+  /// * SQUADRON OWNER, 2026-08-24 *
+  ///
+  /// "we want to add a feature that allows users to make their plans available for the entire
+  /// squadron to view without it being a squadron plan etc." — and, asked what others may then do
+  /// with one: read-only, but haulable.
+  ///
+  /// * WHY A SECOND FIELD RATHER THAN A THIRD OWNER *
+  ///
+  /// `owner` answers "whose plan is this", and it decides who may EDIT. Adding a third value would
+  /// make one column answer two questions, and the one that would quietly change is editing: a
+  /// `shared` owner is not a squadron plan, so officers must not gain edit rights over it, and its
+  /// author must not lose theirs. Splitting the questions keeps the edit rule exactly as it was.
+  ///
+  /// ColonyProject already carries this separation — the same enum, alongside its own owner — so
+  /// this is an established pattern rather than a new idea.
+  ///
+  /// `public` is deliberately NOT offered here. The ruling was squadron-visible; a plan on a public
+  /// link is a different feature nobody has asked for, and the enum permitting it does not mean the
+  /// service should.
+  visibility ColonyVisibility @default(private)
+
   title      String
   systemName String  @map("system_name")
   systemId64 BigInt? @map("system_id64")

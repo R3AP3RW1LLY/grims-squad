@@ -1,0 +1,45 @@
+-- Who may SEE a personal plan.
+--
+-- ★ SQUADRON OWNER, 2026-08-24 ★
+--
+-- "we want to add a feature that allows users to make their plans available for the entire squadron
+-- to view without it being a squadron plan etc." Asked what others may then do with one, the ruling
+-- was: read-only, but haulable.
+--
+-- ★ A SECOND FIELD, NOT A THIRD OWNER ★
+--
+-- `owner` answers "whose plan is this" and decides who may EDIT. Adding a third value to it would
+-- make one column answer two questions, and the answer that would quietly change is the edit rule:
+-- a `shared` owner is not a squadron plan, so officers must not gain edit rights over it, and its
+-- author must not lose theirs.
+--
+-- Splitting the questions leaves `mayEdit` untouched, which is the point. colony_projects already
+-- carries exactly this separation, so the shape is proven rather than invented.
+--
+-- ★ THE TYPE ALREADY EXISTS ★
+--
+-- "ColonyVisibility" was created for colony_projects and holds private, squadron, public. No CREATE
+-- TYPE here, and deliberately no new value: `public` is in the enum and will NOT be offered for
+-- plans. The ruling was squadron-visible; a plan on a public link is a different feature nobody
+-- asked for, and an enum permitting something is not a reason for a service to.
+--
+-- ★ WHY THIS IS SAFE DURING A DEPLOY ★
+--
+-- Adding a column with a CONSTANT default is catalogue-only in PostgreSQL 11+: the default is
+-- recorded once and materialised on read, so there is no table rewrite and no full scan. The
+-- ACCESS EXCLUSIVE lock is held for microseconds.
+--
+-- No index is created. The repo's rule, learned on 2026-08-22 when a CREATE INDEX during a deploy
+-- blocked every INSERT behind it and stalled EDDN ingestion for sixteen minutes: never build an
+-- index inside a migration, never CONCURRENTLY (it cannot run in a migration's transaction), and
+-- cap maintenance_work_mem for anything that needs a work area. None of that applies to one ALTER
+-- TABLE that sorts nothing.
+--
+-- ★ EVERY EXISTING PLAN STAYS PRIVATE ★
+--
+-- `private` is the default, so nothing somebody wrote before this column existed becomes visible to
+-- the squadron because a migration ran. Sharing is a decision, made once, by the person whose plan
+-- it is. Squadron plans ignore the column entirely — they are visible to every member by
+-- definition, and that is enforced in the service rather than by backfilling a value here.
+ALTER TABLE "colony_plans"
+  ADD COLUMN "visibility" "ColonyVisibility" NOT NULL DEFAULT 'private';

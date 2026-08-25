@@ -563,6 +563,16 @@ export interface ColonyPlan {
   readonly orphanFlags?: readonly PlanOrphanFlag[];
   id: string;
   owner: 'squadron' | 'personal';
+  /**
+   * Who may SEE it. `owner` still decides who may EDIT.
+   *
+   * Squadron owner, 2026-08-24: a member can make a plan "available for the entire squadron to view
+   * without it being a squadron plan". Read-only for everybody else.
+   *
+   * Optional because an older hub does not send it, and a required field would make the app fail to
+   * parse a plan it could otherwise draw entirely.
+   */
+  readonly visibility?: 'private' | 'squadron' | undefined;
   title: string;
   systemName: string;
   systemId64: string | null;
@@ -1275,6 +1285,22 @@ export const applyPlanImport = (
   file: string,
 ): Promise<Answer<{ slotsWritten: number }>> =>
   hubColony(call, `/plans/${encodeURIComponent(id)}/import`, { method: 'POST', body: { file } });
+
+/**
+ * Shares a personal plan with the squadron, or takes it back.
+ *
+ * Only the author may — the hub enforces it, deliberately not officers: sharing is a decision about
+ * somebody's own unfinished work.
+ */
+export const setPlanVisibility = (
+  call: HubCall,
+  id: string,
+  shared: boolean,
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}/visibility`, {
+    method: 'PATCH',
+    body: { shared },
+  });
 
 export const removePlanSite = (
   call: HubCall,

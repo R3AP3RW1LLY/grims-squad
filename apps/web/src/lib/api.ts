@@ -2943,6 +2943,13 @@ export interface PlanOrphanFlag {
 export interface ColonyPlan {
   id: string;
   owner: 'squadron' | 'personal';
+  /**
+   * Who may SEE it. `owner` still decides who may EDIT.
+   *
+   * `squadron` on a personal plan means the author has shared it: any member may read it and haul
+   * to the projects it spawned, and only the author may change it.
+   */
+  visibility: 'private' | 'squadron';
   title: string;
   /** Empty for a healthy plan, which is nearly all of them. */
   orphanFlags?: PlanOrphanFlag[];

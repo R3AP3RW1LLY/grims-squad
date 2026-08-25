@@ -138,10 +138,22 @@ describe('a system claim', () => {
     expect(reader, 'the reader writes nothing').not.toMatch(/colonyPlan\.create|INSERT INTO/i);
   });
 
-  it('skips systems that are already planned by anybody', () => {
+  it('skips systems already planned by anybody whose plan you can SEE', () => {
     /*
-     * Matched against EVERY plan, not just the caller's: a member who claimed a system an officer
-     * has already planned as a squadron build does not need telling to plan it again.
+     * ★ THIS TEST SAID "BY ANYBODY", AND THAT STOPPED BEING RIGHT — 2026-08-24 ★
+     *
+     * The case it was written for still holds: a member who claimed a system an officer has already
+     * planned as a squadron build does not need telling to plan it again. Squadron plans are
+     * visible to every member, so that is unaffected.
+     *
+     * What "every plan" also did was drop a system from your list because of somebody else's
+     * PRIVATE plan — one you cannot open, cannot find, and are given no reason for. A row silently
+     * missing on the strength of something you are not allowed to know exists is a small leak and a
+     * worse piece of UI, because there is nothing you could do to work out why.
+     *
+     * It is raw SQL now rather than a Prisma-client read. `acl-usage.spec.ts` failed the build the
+     * moment ColonyPlan became an ACL-registered model, and a bound client for one query out of
+     * thirty would have implied a protection the raw reads around it do not have.
      */
     const service = read('colony-plan.service.ts');
     const reader = service.slice(
@@ -149,9 +161,12 @@ describe('a system claim', () => {
       service.indexOf('async list('),
     );
 
-    expect(reader).toMatch(/colonyPlan\.findMany/);
-    expect(reader, 'case-insensitively, since a system name is typed').toMatch(
-      /mode: 'insensitive'/,
+    expect(reader, 'no client read of a governed model').not.toMatch(/colonyPlan\.findMany/);
+    expect(reader, 'the three ways a plan is visible').toMatch(
+      /owner = 'squadron' OR posted_by_id = \$2::uuid OR visibility = 'squadron'/,
+    );
+    expect(reader, 'matched case-insensitively, since a system name is typed').toMatch(
+      /lower\(system_name\) = ANY\(\$1::text\[\]\)/,
     );
   });
 });
