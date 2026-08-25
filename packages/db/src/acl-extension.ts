@@ -299,6 +299,50 @@ function predicateFor(model: AclModel, p: AclPrincipal): object {
       }
       return { OR: or };
     }
+    case 'ColonyPlan': {
+      /*
+       * ★ NOT THE SAME SHAPE AS ColonyProject, AND THE DIFFERENCES ARE THE POINT ★
+       *
+       * Squadron owner, 2026-08-24: plans a member can make "available for the entire squadron to
+       * view without it being a squadron plan". Read-only, and only the author may share.
+       *
+       * Two things separate this from the project predicate below, and copying that one would have
+       * got both wrong:
+       *
+       * ★ NO ANONYMOUS READ, EVER ★
+       *
+       * A project may be `public`, because publishing one is how a member asks the wider galaxy for
+       * help. A plan is never public — the ruling was squadron-visible, and there is no share link.
+       * So there is no clause here that matches without a session: a signed-out reader sees nothing,
+       * which is why the OR list starts EMPTY rather than with a public case.
+       *
+       * ★ OWNERSHIP IS A SEPARATE COLUMN FROM VISIBILITY ★
+       *
+       * A SQUADRON plan is every member's by definition and ignores `visibility` entirely — its
+       * rows may well say `private`, because that is the column default and nothing backfilled
+       * them. Reading the column alone would therefore hide the squadron's own plans from everyone,
+       * which is why `owner` is tested here in its own right.
+       *
+       * Sharing never confers editing. That rule lives in `mayEdit`, which does not consult this
+       * column at all; this layer only decides who may SEE a row.
+       */
+      if (p.userId === null) {
+        // FAIL CLOSED, and deliberately not reachable by any anonymous route today — this is the
+        // guarantee that stays true when one is added.
+        return { id: { in: [] } };
+      }
+
+      return {
+        OR: [
+          // Every signed-in member sees the squadron's plans, whatever the column says.
+          { owner: 'squadron' },
+          // Your own, whatever its visibility.
+          { postedById: p.userId },
+          // And a personal plan its author has chosen to share.
+          { visibility: 'squadron' },
+        ],
+      };
+    }
     case 'ColonyProject': {
       /*
        * ★ THE SAME SHAPE AS ShipBuild, AND FOR THE SAME REASONS ★
