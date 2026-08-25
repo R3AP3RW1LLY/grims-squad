@@ -187,6 +187,27 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Lay out a whole system before you build any of it.',
     requires: Permission.COLONY_VIEW,
   },
+  /*
+   * ★ SQUADRON OWNER, 2026-08-24 ★
+   *
+   * "a way to allow members who have multiple systems in their colonization to create a nexus that
+   * will predict trade routes."
+   *
+   * Below Planning because it is the step AFTER it: planning lays out one system, the nexus asks
+   * what several of them can supply each other — and, more usefully, what none of them makes.
+   *
+   * Listed the moment the pages existed. The table behind this feature sat in the schema for weeks
+   * with routes and no way in, which is why it held zero rows; a page nobody can navigate to is the
+   * same bug wearing a different hat, and this project has now found six of them.
+   */
+  {
+    href: '/colonisation/nexus',
+    label: 'Nexus',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'What a group of our systems can supply each other — and what none of them makes.',
+    requires: Permission.COLONY_VIEW,
+  },
   {
     href: '/colonisation/build-types',
     label: 'Build types',
